@@ -12,10 +12,8 @@
       <div class="titlebar" id="titlebar">
         <span class="companion-name" id="companionName">...</span>
         <span class="mood-badge" id="moodBadge">HAPPY</span>
-        <span class="activity-chip" id="activityChip" hidden></span>
-        <button class="btn-resize" id="btnMute" title="Mutar / ativar sons">🔊</button>
-        <button class="btn-resize" id="btnHabitat" title="Abrir quarto">⌂</button>
-        <button class="btn-resize" id="btnResize" title="Alternar tamanho">⤢</button>
+        <span class="screen-eye" id="screenEye" hidden title="Consciência de tela ativa">👁</span>
+        <button class="btn-resize" id="btnSettings" title="Configurações">⚙</button>
         <button class="btn-resize" id="btnMinimize" title="Minimizar para o tray">−</button>
         <button class="btn-close" id="btnClose" title="Minimizar">×</button>
       </div>
@@ -50,6 +48,8 @@
             <span id="speechText"></span>
           </div>
 
+          <div class="activity-inline" id="activityChip" hidden></div>
+
           <div class="stats">
             <div class="stat-row">
               <span class="stat-label">Afeto</span>
@@ -58,6 +58,18 @@
               </div>
               <span class="stat-value" id="affectionValue">--</span>
             </div>
+            <div class="stat-row">
+              <span class="stat-label">Energia</span>
+              <div class="stat-bar-bg">
+                <div class="stat-bar energy-bar" id="energyBar"></div>
+              </div>
+              <span class="stat-value" id="energyValue">--</span>
+            </div>
+          </div>
+
+          <div class="missions-strip" id="missionsStrip" hidden>
+            <span class="missions-label" id="missionsLabel">Missões</span>
+            <span class="missions-streak" id="missionsStreak"></span>
           </div>
 
           <div class="media-bar" id="mediaBar" title="Só controla se Spotify/Music já estiver aberto">
@@ -146,6 +158,90 @@
           <button class="btn-close-feed" id="btnCloseFeed">×</button>
         </div>
         <ul class="feed-list" id="feedList"></ul>
+      </div>
+
+      <!-- Painel de Config -->
+      <div class="feed-panel settings-panel" id="settingsPanel" hidden>
+        <div class="feed-header">
+          <span>⚙ Config</span>
+          <button class="btn-close-feed" id="btnCloseSettings">×</button>
+        </div>
+        <div class="settings-body">
+          <section class="settings-section">
+            <h3>Sons</h3>
+            <label class="settings-row"><span>Mutar SFX</span>
+              <input type="checkbox" id="cfgSoundMuted" />
+            </label>
+          </section>
+          <section class="settings-section">
+            <h3>Notificações</h3>
+            <label class="settings-row"><span>Mutar toasts / nudges</span>
+              <input type="checkbox" id="cfgNotificationsMuted" />
+            </label>
+            <label class="settings-row"><span>Frequência dos nudges</span>
+              <select id="cfgNudgeInterval">
+                <option value="5">5 min</option>
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+              </select>
+            </label>
+            <label class="settings-row"><span>Modo foco</span>
+              <input type="checkbox" id="cfgFocusMode" />
+            </label>
+            <label class="settings-row"><span>Duração do foco</span>
+              <select id="cfgFocusHours">
+                <option value="1">1 hora</option>
+                <option value="2">2 horas</option>
+              </select>
+            </label>
+          </section>
+          <section class="settings-section">
+            <h3>Comportamento</h3>
+            <label class="settings-row"><span>Pegadinhas</span>
+              <input type="checkbox" id="cfgPranks" />
+            </label>
+            <label class="settings-row"><span>Modo mínimo</span>
+              <input type="checkbox" id="cfgCompact" />
+            </label>
+            <div class="settings-actions">
+              <button type="button" class="settings-btn" id="cfgOpenHabitat">Abrir quarto</button>
+              <button type="button" class="settings-btn" id="cfgToggleSize">Alternar tamanho</button>
+            </div>
+          </section>
+          <section class="settings-section">
+            <h3>Mídia</h3>
+            <label class="settings-row"><span>Ouvindo música (manual)</span>
+              <input type="checkbox" id="cfgListeningMusic" />
+            </label>
+          </section>
+          <section class="settings-section">
+            <h3>Memória</h3>
+            <label class="settings-row"><span>Lembrar conversas</span>
+              <input type="checkbox" id="cfgRememberChats" checked />
+            </label>
+          </section>
+          <section class="settings-section">
+            <h3>Consciência</h3>
+            <label class="settings-row"><span>Perceber app ativo</span>
+              <input type="checkbox" id="cfgPerceiveApp" checked />
+            </label>
+            <label class="settings-row"><span>Usar título da janela</span>
+              <input type="checkbox" id="cfgWindowTitle" checked />
+            </label>
+            <label class="settings-row"><span>Comentar mídia / leitura</span>
+              <input type="checkbox" id="cfgCommentMedia" checked />
+            </label>
+            <label class="settings-row"><span>Pode olhar a tela (vision)</span>
+              <input type="checkbox" id="cfgScreenVision" />
+            </label>
+            <p class="settings-hint">Vision fica off por padrão. Captura real entra depois; por enquanto só prepara a preferência.</p>
+          </section>
+          <section class="settings-section" id="missionsSection">
+            <h3>Missões de hoje</h3>
+            <ul class="missions-list" id="missionsList"></ul>
+            <p class="settings-hint" id="streakHint"></p>
+          </section>
+        </div>
       </div>
 
       <div class="loading-overlay" id="loadingOverlay" hidden>

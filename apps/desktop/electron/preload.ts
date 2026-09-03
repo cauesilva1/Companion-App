@@ -10,6 +10,9 @@ export type PresencePayload = {
   batteryPercent?: number | null;
   batteryLow?: boolean;
   trackTitle?: string;
+  frontApp?: string;
+  screenHint?: string;
+  screenKind?: string;
 };
 
 export type SkinView = {
@@ -32,6 +35,8 @@ contextBridge.exposeInMainWorld("companion", {
   getFeed: (limit?: number) => ipcRenderer.invoke("companion:getFeed", limit),
   createCompanion: (body: object) => ipcRenderer.invoke("companion:createCompanion", body),
   getSession: () => ipcRenderer.invoke("companion:getSession"),
+  getSettings: () => ipcRenderer.invoke("companion:getSettings"),
+  setSettings: (patch: object) => ipcRenderer.invoke("companion:setSettings", patch),
   setQuizMode: (on: boolean) => ipcRenderer.invoke("companion:setQuizMode", on),
   setCompact: (on: boolean) => ipcRenderer.invoke("companion:setCompact", on),
   setHabitat: (on: boolean) => ipcRenderer.invoke("companion:setHabitat", on),
@@ -61,8 +66,17 @@ contextBridge.exposeInMainWorld("companion", {
     pranksEnabled: boolean;
     habitat?: boolean;
     listeningMusic?: boolean;
+    notificationsMuted?: boolean;
+    nudgeIntervalMin?: number;
+    rememberChats?: boolean;
+    focusMode?: boolean;
+    perceiveApp?: boolean;
+    screenVision?: boolean;
   }) => void) => {
     ipcRenderer.on("companion:modeChanged", (_event, mode) => cb(mode));
+  },
+  onSettingsChanged: (cb: (settings: Record<string, unknown>) => void) => {
+    ipcRenderer.on("companion:settingsChanged", (_event, settings) => cb(settings));
   },
   onPlaySound: (cb: (kind: string) => void) => {
     ipcRenderer.on("companion:playSound", (_event, kind: string) => cb(kind));

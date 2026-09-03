@@ -18,6 +18,7 @@ import * as http from "http";
 import * as url from "url";
 import { findSkin, isValidSkinId, listSkins, normalizeSkinId, SkinView } from "./skinCatalog";
 import { getNowPlaying, mediaCommand } from "./mediaMac";
+import { getFrontScreenContext, isSensitiveApp } from "./screenContext";
 
 require("dotenv").config({ path: path.join(__dirname, "../../../../.env") });
 require("dotenv").config({ path: path.join(__dirname, "../../.env") });
@@ -40,6 +41,19 @@ interface SessionData {
   soundMuted?: boolean;
   listeningMusic?: boolean;
   skinId?: string;
+  notificationsMuted?: boolean;
+  nudgeIntervalMin?: 5 | 15 | 30;
+  focusUntil?: number;
+  focusHours?: 1 | 2;
+  rememberChats?: boolean;
+  perceiveApp?: boolean;
+  useWindowTitle?: boolean;
+  commentMedia?: boolean;
+  screenVision?: boolean;
+  streakCount?: number;
+  lastVisitDay?: string; // YYYY-MM-DD
+  missionsDay?: string;
+  missionsDone?: string[]; // play|chat|music
 }
 
 let companionId = "";
@@ -56,6 +70,24 @@ let pranksEnabled = false;
 let soundMuted = false;
 let listeningMusic = false;
 let listeningMusicManual = false;
+let notificationsMuted = false;
+let nudgeIntervalMin: 5 | 15 | 30 = 15;
+let focusUntil = 0;
+let focusHours: 1 | 2 = 1;
+let rememberChats = true;
+let perceiveApp = true;
+let useWindowTitle = true;
+let commentMedia = true;
+let screenVision = false;
+let streakCount = 0;
+let lastVisitDay = "";
+let missionsDay = "";
+let missionsDone: string[] = [];
+let lastScreenHint = "";
+let lastScreenApp = "";
+let lastScreenKind: string | undefined;
+let lastScreenCommentAt = 0;
+let screenTimer: ReturnType<typeof setInterval> | null = null;
 let savedX: number | undefined;
 let savedY: number | undefined;
 let prankTimer: ReturnType<typeof setInterval> | null = null;
@@ -71,6 +103,8 @@ let batteryLowWarned = false;
 let windowMinimized = false;
 let lastMinimizedNudgeAt = 0;
 let isQuitting = false;
+let cachedAffection = 50;
+let cachedEnergy = 80;
 const IDLE_THRESHOLD_MIN = 3;
 
 /** Ícone do companion (dino recortado) — tray, toast e notificação nativa. */
@@ -170,6 +204,21 @@ function loadSession() {
       soundMuted = data.soundMuted === true;
       listeningMusic = !!data.listeningMusic;
       listeningMusicManual = listeningMusic;
+      notificationsMuted = !!data.notificationsMuted;
+      if (data.nudgeIntervalMin === 5 || data.nudgeIntervalMin === 15 || data.nudgeIntervalMin === 30) {
+        nudgeIntervalMin = data.nudgeIntervalMin;
+      }
+      focusUntil = typeof data.focusUntil === "number" ? data.focusUntil : 0;
+      if (data.focusHours === 1 || data.focusHours === 2) focusHours = data.focusHours;
+      rememberChats = data.rememberChats !== false;
+      perceiveApp = data.perceiveApp !== false;
+      useWindowTitle = data.useWindowTitle !== false;
+      commentMedia = data.commentMedia !== false;
+      screenVision = !!data.screenVision;
+      streakCount = typeof data.streakCount === "number" ? data.streakCount : 0;
+      lastVisitDay = typeof data.lastVisitDay === "string" ? data.lastVisitDay : "";
+      missionsDay = typeof data.missionsDay === "string" ? data.missionsDay : "";
+      missionsDone = Array.isArray(data.missionsDone) ? data.missionsDone.map(String) : [];
       if (data.skinId && isValidSkinId(data.skinId)) currentSkinId = normalizeSkinId(data.skinId);
       savedX = typeof data.x === "number" ? data.x : undefined;
       savedY = typeof data.y === "number" ? data.y : undefined;
@@ -188,6 +237,19 @@ function saveSession() {
     soundMuted,
     listeningMusic: listeningMusicManual,
     skinId: currentSkinId,
+    notificationsMuted,
+    nudgeIntervalMin,
+    focusUntil,
+    focusHours,
+    rememberChats,
+    perceiveApp,
+    useWindowTitle,
+    commentMedia,
+    screenVision,
+    streakCount,
+    lastVisitDay,
+    missionsDay,
+    missionsDone,
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
     const [x, y] = mainWindow.getPosition();
@@ -254,7 +316,74 @@ function windowSize(): { w: number; h: number } {
   if (quizMode) return { w: 520, h: 480 };
   if (habitatMode) return { w: 440, h: 380 };
   if (compact) return { w: 160, h: 160 };
-  return { w: 440, h: 210 };
+  return { w: 440, h: 236 };
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isFocusModeActive() {
+  return focusUntil > Date.now();
+}
+
+function settingsPayload() {
+  return {
+    companionId,
+    compact,
+    soundMuted,
+    notificationsMuted,
+    nudgeIntervalMin,
+    pranksEnabled,
+    habitat: habitatMode,
+    listeningMusic: listeningMusicManual,
+    focusMode: isFocusModeActive(),
+    focusUntil,
+    focusHours,
+    rememberChats,
+    perceiveApp,
+    useWindowTitle,
+    commentMedia,
+    screenVision,
+    streakCount,
+    missions: { day: missionsDay, done: missionsDone },
+    screenHint: lastScreenHint,
+    screenApp: lastScreenApp,
+  };
+}
+
+function emitSettings() {
+  mainWindow?.webContents.send("companion:settingsChanged", settingsPayload());
+  emitMode();
+}
+
+function ensureDailyProgress() {
+  const day = todayKey();
+  if (lastVisitDay !== day) {
+    if (lastVisitDay) {
+      const prev = new Date(lastVisitDay + "T12:00:00");
+      const cur = new Date(day + "T12:00:00");
+      const diff = Math.round((cur.getTime() - prev.getTime()) / (24 * 3600 * 1000));
+      streakCount = diff === 1 ? streakCount + 1 : 1;
+    } else {
+      streakCount = 1;
+    }
+    lastVisitDay = day;
+  }
+  if (missionsDay !== day) {
+    missionsDay = day;
+    missionsDone = [];
+  }
+  saveSession();
+}
+
+function markMission(id: "play" | "chat" | "music") {
+  ensureDailyProgress();
+  if (!missionsDone.includes(id)) {
+    missionsDone = [...missionsDone, id];
+    saveSession();
+    emitSettings();
+  }
 }
 
 function timeOfDay(): string {
@@ -312,6 +441,9 @@ function presencePayload(extra?: { missedYou?: boolean }) {
     batteryPercent,
     batteryLow,
     trackTitle: lastTrackTitle || undefined,
+    frontApp: lastScreenApp || undefined,
+    screenHint: lastScreenHint || undefined,
+    screenKind: lastScreenKind || undefined,
   };
 }
 
@@ -323,12 +455,13 @@ async function refreshNowPlaying() {
       listeningMusic = true;
       lastTrackTitle = [info.title, info.artist].filter(Boolean).join(" — ");
       if (lastTrackTitle && lastTrackTitle !== prev) {
+        markMission("music");
         const short = info.title || lastTrackTitle;
         mainWindow?.webContents.send(
           "companion:localLine",
           `Ouvindo “${short}”… curti.`
         );
-        if (windowMinimized && lastTrackTitle !== lastNotifiedTrack) {
+        if (windowMinimized && lastTrackTitle !== lastNotifiedTrack && !notificationsMuted) {
           lastNotifiedTrack = lastTrackTitle;
           showCompanionNotification(companionName, `Agora tocando: ${short}`);
         }
@@ -342,6 +475,43 @@ async function refreshNowPlaying() {
   } catch {
     /* ignore */
   }
+}
+
+async function refreshScreenContext() {
+  if (!perceiveApp || isFocusModeActive()) {
+    lastScreenHint = "";
+    lastScreenApp = "";
+    lastScreenKind = undefined;
+    return;
+  }
+  const ctx = await getFrontScreenContext();
+  if (!ctx || isSensitiveApp(ctx.appName)) {
+    lastScreenHint = "";
+    lastScreenApp = "";
+    lastScreenKind = undefined;
+    return;
+  }
+  const prevHint = lastScreenHint;
+  lastScreenApp = ctx.appName;
+  lastScreenKind = ctx.kind;
+  lastScreenHint = useWindowTitle ? ctx.hint : `Junto no ${ctx.appName}.`;
+  if (
+    commentMedia &&
+    (ctx.kind === "video" || ctx.kind === "reading" || ctx.kind === "music") &&
+    lastScreenHint &&
+    lastScreenHint !== prevHint &&
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible() &&
+    !windowMinimized
+  ) {
+    const now = Date.now();
+    if (now - lastScreenCommentAt > 90_000) {
+      lastScreenCommentAt = now;
+      mainWindow.webContents.send("companion:localLine", lastScreenHint);
+    }
+  }
+  emitPresence();
 }
 
 function emitPresence(extra?: { missedYou?: boolean }) {
@@ -375,6 +545,12 @@ function emitMode() {
     pranksEnabled,
     habitat: habitatMode,
     listeningMusic,
+    notificationsMuted,
+    nudgeIntervalMin,
+    rememberChats,
+    focusMode: isFocusModeActive(),
+    perceiveApp,
+    screenVision,
   });
 }
 
@@ -529,6 +705,8 @@ function escapeHtml(s: string) {
 }
 
 function showCompanionNotification(title: string, body: string, opts?: { forceToast?: boolean }) {
+  if (notificationsMuted) return;
+
   const forceToast = opts?.forceToast ?? windowMinimized;
 
   // Toast próprio sempre que estiver minimizado — confiável no macOS
@@ -568,6 +746,15 @@ function showCompanionNotification(title: string, body: string, opts?: { forceTo
 }
 
 function pickMinimizedNudge(): string {
+  if (cachedEnergy < 25) {
+    return "Sem energia… brinca comigo um pouco?";
+  }
+  if (cachedAffection < 28) {
+    return "Tô com saudade. Um poke resolve.";
+  }
+  if (lastScreenHint && commentMedia && Math.random() < 0.55) {
+    return lastScreenHint;
+  }
   const idleMin = Math.floor((Date.now() - lastUserTouchAt) / 60_000);
   if (listeningMusic && lastTrackTitle) {
     const lines = [
@@ -576,6 +763,14 @@ function pickMinimizedNudge(): string {
       `Música rolando… e eu aqui no canto.`,
     ];
     return lines[Math.floor(Math.random() * lines.length)];
+  }
+  if (lastScreenHint && commentMedia) {
+    const contextual = [
+      lastScreenHint,
+      `Ainda no ${lastScreenApp || "app"}… eu tô por aqui.`,
+      "Vi o que você tá fazendo. Volta quando puder.",
+    ];
+    return contextual[Math.floor(Math.random() * contextual.length)];
   }
   if (idleMin >= IDLE_THRESHOLD_MIN) {
     const lines = [
@@ -597,9 +792,12 @@ function pickMinimizedNudge(): string {
 }
 
 function maybeMinimizedNudge() {
-  if (!windowMinimized || !companionId || quizMode) return;
+  if (notificationsMuted || isFocusModeActive() || !windowMinimized || !companionId || quizMode) {
+    return;
+  }
   const now = Date.now();
-  if (now - lastMinimizedNudgeAt < 4 * 60_000) return;
+  const interval = nudgeIntervalMin * 60_000;
+  if (now - lastMinimizedNudgeAt < interval) return;
   lastMinimizedNudgeAt = now;
   showCompanionNotification(companionName, pickMinimizedNudge());
 }
@@ -614,6 +812,7 @@ function minimizeToTray() {
   if (process.platform === "darwin") {
     app.hide();
   }
+  if (notificationsMuted) return;
   setTimeout(() => {
     showCompanionNotification(
       companionName,
@@ -718,7 +917,7 @@ function rebuildTray() {
         click: (item) => {
           pranksEnabled = item.checked;
           saveSession();
-          emitMode();
+          emitSettings();
           rebuildTray();
         },
       },
@@ -729,7 +928,34 @@ function rebuildTray() {
         click: (item) => {
           soundMuted = item.checked;
           saveSession();
-          emitMode();
+          emitSettings();
+          rebuildTray();
+        },
+      },
+      {
+        label: "Notificações mudas",
+        type: "checkbox",
+        checked: notificationsMuted,
+        click: (item) => {
+          notificationsMuted = item.checked;
+          saveSession();
+          emitSettings();
+          rebuildTray();
+        },
+      },
+      {
+        label: "Modo foco",
+        type: "checkbox",
+        checked: isFocusModeActive(),
+        click: (item) => {
+          if (item.checked) {
+            focusUntil = Date.now() + focusHours * 3600_000;
+            showCompanionNotification(companionName, "Modo foco ligado");
+          } else {
+            focusUntil = 0;
+          }
+          saveSession();
+          emitSettings();
           rebuildTray();
         },
       },
@@ -742,7 +968,7 @@ function rebuildTray() {
           listeningMusic = item.checked;
           if (!item.checked) lastTrackTitle = "";
           saveSession();
-          emitMode();
+          emitSettings();
           emitPresence();
           rebuildTray();
         },
@@ -848,7 +1074,7 @@ async function runPrank(kind: PrankKind) {
 }
 
 function maybeRandomPrank() {
-  if (!pranksEnabled || quizMode || !companionId) return;
+  if (!pranksEnabled || quizMode || !companionId || isFocusModeActive()) return;
   if (Math.random() > 0.15) return;
   const pool: PrankKind[] = ["shake", "bounce", "notify", "tease-sound", "hide-and-seek"];
   void runPrank(pool[Math.floor(Math.random() * pool.length)]);
@@ -921,14 +1147,78 @@ function createWindow() {
   });
 }
 
-ipcMain.handle("companion:getSession", () => ({
-  companionId,
-  compact,
-  soundMuted,
-  pranksEnabled,
-  habitat: habitatMode,
-  listeningMusic,
-}));
+ipcMain.handle("companion:getSession", () => settingsPayload());
+
+ipcMain.handle("companion:getSettings", () => settingsPayload());
+
+function applySettingsPatch(patch: Record<string, unknown> = {}) {
+  const prevCompact = compact;
+  const prevHabitat = habitatMode;
+  let focusToggledOn = false;
+
+  if (typeof patch.compact === "boolean") {
+    compact = patch.compact;
+    if (compact) habitatMode = false;
+  }
+  if (typeof patch.habitat === "boolean") {
+    habitatMode = patch.habitat;
+    if (habitatMode) compact = false;
+  }
+  if (typeof patch.soundMuted === "boolean") soundMuted = patch.soundMuted;
+  if (typeof patch.notificationsMuted === "boolean") notificationsMuted = patch.notificationsMuted;
+  if (typeof patch.pranksEnabled === "boolean") pranksEnabled = patch.pranksEnabled;
+  if (patch.nudgeIntervalMin === 5 || patch.nudgeIntervalMin === 15 || patch.nudgeIntervalMin === 30) {
+    nudgeIntervalMin = patch.nudgeIntervalMin;
+  }
+  if (patch.focusHours === 1 || patch.focusHours === 2) focusHours = patch.focusHours;
+  if (typeof patch.rememberChats === "boolean") rememberChats = patch.rememberChats;
+  if (typeof patch.perceiveApp === "boolean") perceiveApp = patch.perceiveApp;
+  if (typeof patch.useWindowTitle === "boolean") useWindowTitle = patch.useWindowTitle;
+  if (typeof patch.commentMedia === "boolean") commentMedia = patch.commentMedia;
+  if (typeof patch.screenVision === "boolean") screenVision = patch.screenVision;
+  if (typeof patch.listeningMusic === "boolean") {
+    listeningMusicManual = patch.listeningMusic;
+    listeningMusic = patch.listeningMusic;
+    if (!patch.listeningMusic) lastTrackTitle = "";
+  }
+
+  if (typeof patch.focusMode === "boolean") {
+    if (patch.focusMode) {
+      focusUntil = Date.now() + focusHours * 3600_000;
+      focusToggledOn = true;
+    } else {
+      focusUntil = 0;
+    }
+  }
+
+  if (!perceiveApp || isFocusModeActive()) {
+    lastScreenHint = "";
+    lastScreenApp = "";
+    lastScreenKind = undefined;
+  }
+
+  saveSession();
+  rebuildTray();
+  emitSettings();
+
+  if (prevCompact !== compact || prevHabitat !== habitatMode) {
+    placeWindow();
+  }
+
+  if (focusToggledOn) {
+    showCompanionNotification(companionName, "Modo foco ligado");
+  }
+
+  if (perceiveApp && !isFocusModeActive()) {
+    void refreshScreenContext();
+  }
+
+  return settingsPayload();
+}
+
+ipcMain.handle("companion:setSettings", (_e, patch: Record<string, unknown> = {}) =>
+  applySettingsPatch(patch ?? {})
+);
 
 ipcMain.handle("companion:setQuizMode", (_e, on: boolean) => {
   quizMode = on;
@@ -982,6 +1272,7 @@ ipcMain.handle("companion:createCompanion", async (_e, body: object) => {
     compact = false;
     habitatMode = false;
     touchUserActivity();
+    ensureDailyProgress();
     saveSession();
     rebuildTray();
     placeWindow();
@@ -994,6 +1285,7 @@ ipcMain.handle("companion:createCompanion", async (_e, body: object) => {
 ipcMain.handle("companion:getState", async () => {
   if (!companionId) return { ok: false, error: "NO_COMPANION" };
   try {
+    ensureDailyProgress();
     const data = (await fetchJSON(`/companion/${companionId}/state`)) as {
       alert?: string;
       name?: string;
@@ -1001,7 +1293,11 @@ ipcMain.handle("companion:getState", async () => {
       artStyle?: string;
       backdrop?: string;
       greeting?: string;
+      affection?: number;
+      energy?: number;
     };
+    if (typeof data.affection === "number") cachedAffection = data.affection;
+    if (typeof data.energy === "number") cachedEnergy = data.energy;
     if (data.name) companionName = data.name;
     if (data.skin && isValidSkinId(data.skin) && data.skin !== currentSkinId) {
       // keep session skin preference; don't override collectible choice from API form
@@ -1024,18 +1320,31 @@ ipcMain.handle("companion:interact", async (_e, type: string, message?: string) 
   if (!companionId) return { ok: false, error: "NO_COMPANION" };
   try {
     touchUserActivity(type);
-    const body: Record<string, unknown> = { type, pranksEnabled };
-      if (message) body.message = message;
+    if (type === "PLAY") markMission("play");
+    if (type === "CHAT") markMission("chat");
+    const body: Record<string, unknown> = {
+      type,
+      pranksEnabled,
+      rememberChats,
+      trackTitle: lastTrackTitle || undefined,
+      screenHint: perceiveApp ? lastScreenHint || undefined : undefined,
+    };
+    if (message) body.message = message;
     const data = (await fetchJSON(`/companion/${companionId}/interact`, {
-        method: "POST",
-        body,
-    })) as { prank?: PrankKind; companion?: { name?: string } };
+      method: "POST",
+      body,
+    })) as {
+      prank?: PrankKind;
+      companion?: { name?: string; affection?: number; energy?: number };
+    };
     if (data.companion?.name) companionName = data.companion.name;
+    if (typeof data.companion?.affection === "number") cachedAffection = data.companion.affection;
+    if (typeof data.companion?.energy === "number") cachedEnergy = data.companion.energy;
     if (data.prank) void runPrank(data.prank);
-      return { ok: true, data };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 });
 
 ipcMain.handle("companion:getFeed", async (_e, limit = 20) => {
@@ -1095,7 +1404,7 @@ ipcMain.handle("companion:resize", (_e, expanded: boolean) => {
   if (quizMode || compact || habitatMode) return;
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
   const w = expanded ? 520 : 440;
-  const h = expanded ? 260 : 210;
+  const h = expanded ? 286 : 236;
   const x = typeof savedX === "number" ? savedX : sw - w - 16;
   const y = typeof savedY === "number" ? savedY : sh - h - 16;
   const pos = clampToWorkArea(x, y, w, h);
@@ -1113,10 +1422,7 @@ ipcMain.handle("companion:minimize", () => {
 });
 
 ipcMain.handle("companion:setSoundMuted", (_e, on: boolean) => {
-  soundMuted = !!on;
-  saveSession();
-  emitMode();
-  rebuildTray();
+  applySettingsPatch({ soundMuted: !!on });
   return { soundMuted };
 });
 
@@ -1127,6 +1433,7 @@ ipcMain.handle("companion:runPrank", async (_e, kind: PrankKind) => {
 
 app.whenReady().then(async () => {
   loadSession();
+  ensureDailyProgress();
   await refreshBattery();
   await refreshNowPlaying();
   createWindow();
@@ -1144,6 +1451,10 @@ app.whenReady().then(async () => {
     })();
   }, 10_000);
   minimizedNotifyTimer = setInterval(() => maybeMinimizedNudge(), 5 * 60_000);
+  void refreshScreenContext();
+  screenTimer = setInterval(() => {
+    if (perceiveApp) void refreshScreenContext();
+  }, 15_000);
   nativeTheme.on("updated", () => emitPresence());
   app.on("activate", () => {
     // Dock click: janela escondida ainda existe — precisa show, não create
@@ -1160,6 +1471,7 @@ app.on("will-quit", () => {
   if (prankTimer) clearInterval(prankTimer);
   if (presenceTimer) clearInterval(presenceTimer);
   if (minimizedNotifyTimer) clearInterval(minimizedNotifyTimer);
+  if (screenTimer) clearInterval(screenTimer);
   if (toastHideTimer) clearTimeout(toastHideTimer);
   if (toastWindow && !toastWindow.isDestroyed()) {
     toastWindow.destroy();

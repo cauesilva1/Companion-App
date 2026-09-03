@@ -15,7 +15,11 @@ import {
 
 export const mockRouter = Router();
 
-type RuntimeCompanion = ReturnType<typeof toCompanion> & { pendingAlert?: string };
+type RuntimeCompanion = ReturnType<typeof toCompanion> & {
+  pendingAlert?: string;
+  memoryNotes?: string[];
+  userDisplayName?: string;
+};
 
 let file = loadStore();
 
@@ -48,10 +52,44 @@ function writeBack(companion: RuntimeCompanion) {
     lastDecayAt: companion.lastDecayAt.toISOString(),
     lastInteractionAt: companion.lastInteractionAt.toISOString(),
     pendingAlert: companion.pendingAlert,
+    memoryNotes: companion.memoryNotes,
+    userDisplayName: companion.userDisplayName,
   };
   if (idx >= 0) file.companions[idx] = row;
   else file.companions.push(row);
   persist();
+}
+
+function extractMemoryFromMessage(message: string): string[] {
+  const notes: string[] = [];
+  const nameMatch = message.match(
+    /(?:meu nome é|me chamo|pode me chamar de|eu sou o|eu sou a)\s+([A-Za-zÀ-ÿ][\wÀ-ÿ'-]{1,24})/i
+  );
+  if (nameMatch) notes.push(`Usuário se chama ${nameMatch[1]}`);
+  const likeMatch = message.match(/eu (?:gosto|amo|adoro) (?:de |da |do )?(.{3,40})/i);
+  if (likeMatch) notes.push(`Gosta de ${likeMatch[1].trim().replace(/[。.!?].*$/, "")}`);
+  return notes;
+}
+
+function mergeMemory(
+  companion: RuntimeCompanion,
+  extras: string[],
+  trackTitle?: string
+) {
+  const list = [...(companion.memoryNotes ?? [])];
+  for (const n of extras) {
+    if (!list.some((x) => x.toLowerCase() === n.toLowerCase())) list.unshift(n);
+  }
+  if (trackTitle) {
+    const note = `Última música: ${trackTitle.slice(0, 60)}`;
+    const withoutOld = list.filter((x) => !x.startsWith("Última música:"));
+    withoutOld.unshift(note);
+    companion.memoryNotes = withoutOld.slice(0, 8);
+  } else {
+    companion.memoryNotes = list.slice(0, 8);
+  }
+  const nameNote = extras.find((n) => n.startsWith("Usuário se chama "));
+  if (nameNote) companion.userDisplayName = nameNote.replace("Usuário se chama ", "");
 }
 
 function applyDecay(companion: RuntimeCompanion): void {
@@ -94,10 +132,12 @@ function statePayload(companion: RuntimeCompanion) {
     archetype: companion.archetype,
     mood: companion.mood,
     affection: companion.affection,
+    energy: companion.energy,
     lastInteractionAt: companion.lastInteractionAt,
     moodText: moodText(companion.name, companion.mood),
     greeting,
     alert,
+    memoryNotes: companion.memoryNotes ?? [],
   };
 }
 
@@ -183,6 +223,9 @@ const interactSchema = z.object({
   type: z.enum(["POKE", "FEED", "PLAY", "CHAT", "IGNORE_CHECK"]),
   message: z.string().max(500).optional(),
   pranksEnabled: z.boolean().optional(),
+  rememberChats: z.boolean().optional(),
+  trackTitle: z.string().max(120).optional(),
+  screenHint: z.string().max(160).optional(),
 });
 
 mockRouter.post("/:id/interact", async (req, res) => {
@@ -205,6 +248,13 @@ mockRouter.post("/:id/interact", async (req, res) => {
     daysSinceInteraction
   );
 
+  const remember = parsed.data.rememberChats !== false;
+  if (remember && parsed.data.message) {
+    mergeMemory(companion, extractMemoryFromMessage(parsed.data.message), parsed.data.trackTitle);
+  } else if (parsed.data.trackTitle) {
+    mergeMemory(companion, [], parsed.data.trackTitle);
+  }
+
   const history = parsed.data.type === "CHAT" ? chatHistory(companion.id) : [];
 
   let reactionText = await generateReaction(
@@ -221,6 +271,8 @@ mockRouter.post("/:id/interact", async (req, res) => {
       affection: result.affection,
       userMessage: parsed.data.message,
       history,
+      memoryNotes: remember ? companion.memoryNotes : undefined,
+      screenHint: parsed.data.screenHint,
     },
     companion.id
   );
@@ -268,11 +320,13 @@ mockRouter.post("/:id/interact", async (req, res) => {
       name: companion.name,
       mood: companion.mood,
       affection: companion.affection,
+      energy: companion.energy,
       artStyle: companion.artStyle,
       backdrop: companion.backdrop,
       skin: companion.skin,
       archetype: companion.archetype,
       moodText: moodText(companion.name, companion.mood),
+      memoryNotes: companion.memoryNotes ?? [],
     },
     reaction: reactionText,
     prank,

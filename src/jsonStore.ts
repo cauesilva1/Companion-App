@@ -16,6 +16,9 @@ export interface StoredCompanion {
   lastDecayAt: string;
   lastInteractionAt: string;
   pendingAlert?: string;
+  /** Memória curta: fatos lembrados (máx ~8). */
+  memoryNotes?: string[];
+  userDisplayName?: string;
 }
 
 export interface StoredInteraction {

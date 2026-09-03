@@ -40,6 +40,8 @@ export interface ReactionParams {
   affection: number;
   userMessage?: string | null;
   history?: ChatTurn[];
+  memoryNotes?: string[];
+  screenHint?: string;
 }
 
 interface ChatMessage {
@@ -86,11 +88,11 @@ function cacheKey(companionId: string | undefined, message: string) {
 }
 
 function buildMessages(params: ReactionParams): ChatMessage[] {
-  const { companion, mood, userMessage, history = [] } = params;
+  const { companion, mood, userMessage, history = [], memoryNotes, screenHint } = params;
   const arch = companion.archetype ?? "curioso";
   const tone = ARCH_TONE[arch] ?? ARCH_TONE.curioso;
 
-  const system = [
+  const systemParts = [
     `Voce e ${companion.name}, companion virtual.`,
     `Personalidade: ${companion.personality}. Arquétipo: ${arch}.`,
     `Estilo visual (tom): ${companion.artStyle ?? "cartoon"}.`,
@@ -98,9 +100,15 @@ function buildMessages(params: ReactionParams): ChatMessage[] {
     tone,
     `Responda em portugues do Brasil, primeira pessoa, no maximo 12 palavras.`,
     `Apenas a fala. Sem aspas, sem ingles, sem explicar, sem repetir o pedido.`,
-  ].join(" ");
+  ];
+  if (memoryNotes?.length) {
+    systemParts.push(`Memoria curta (use com naturalidade): ${memoryNotes.slice(0, 6).join("; ")}.`);
+  }
+  if (screenHint) {
+    systemParts.push(`Contexto da tela do usuario agora: ${screenHint}`);
+  }
 
-  const messages: ChatMessage[] = [{ role: "system", content: system }];
+  const messages: ChatMessage[] = [{ role: "system", content: systemParts.join(" ") }];
   for (const turn of history.slice(-5)) {
     messages.push({ role: turn.role, content: turn.content });
   }

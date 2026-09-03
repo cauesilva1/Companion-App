@@ -156,11 +156,43 @@ interface CompanionState {
   archetype?: string;
   mood: string;
   affection: number;
+  energy?: number;
   lastInteractionAt: string | null;
   moodText?: string;
   alert?: string;
   greeting?: string;
+  memoryNotes?: string[];
 }
+
+interface CompanionSettings {
+  companionId?: string;
+  compact?: boolean;
+  soundMuted?: boolean;
+  notificationsMuted?: boolean;
+  nudgeIntervalMin?: number;
+  pranksEnabled?: boolean;
+  habitat?: boolean;
+  listeningMusic?: boolean;
+  focusMode?: boolean;
+  focusUntil?: number;
+  focusHours?: number;
+  rememberChats?: boolean;
+  perceiveApp?: boolean;
+  useWindowTitle?: boolean;
+  commentMedia?: boolean;
+  screenVision?: boolean;
+  streakCount?: number;
+  missions?: { day?: string; done?: string[] };
+  screenHint?: string;
+  screenApp?: string;
+}
+
+const MISSION_IDS = ["play", "chat", "music"] as const;
+const MISSION_LABELS: Record<(typeof MISSION_IDS)[number], string> = {
+  play: "Brincar",
+  chat: "Conversar",
+  music: "Ouvir música",
+};
 
 interface InteractionResult {
   companion: CompanionState;
@@ -194,6 +226,9 @@ interface PresencePayload {
   batteryPercent?: number | null;
   batteryLow?: boolean;
   trackTitle?: string;
+  frontApp?: string;
+  screenHint?: string;
+  screenKind?: string;
 }
 
 interface SkinView {
@@ -213,14 +248,9 @@ interface CompanionWindow {
     interact: (type: string, message?: string) => Promise<IpcResult<InteractionResult>>;
     getFeed: (limit?: number) => Promise<IpcResult<FeedItem[]>>;
     createCompanion: (body: object) => Promise<IpcResult<CompanionState>>;
-    getSession: () => Promise<{
-      companionId: string;
-      compact?: boolean;
-      soundMuted?: boolean;
-      pranksEnabled?: boolean;
-      habitat?: boolean;
-      listeningMusic?: boolean;
-    }>;
+    getSession: () => Promise<CompanionSettings>;
+    getSettings: () => Promise<CompanionSettings>;
+    setSettings: (patch: object) => Promise<CompanionSettings>;
     setQuizMode: (on: boolean) => Promise<void>;
     setCompact: (on: boolean) => Promise<{ compact: boolean }>;
     setHabitat: (on: boolean) => Promise<{ habitat: boolean }>;
@@ -247,7 +277,14 @@ interface CompanionWindow {
       pranksEnabled: boolean;
       habitat?: boolean;
       listeningMusic?: boolean;
+      notificationsMuted?: boolean;
+      nudgeIntervalMin?: number;
+      rememberChats?: boolean;
+      focusMode?: boolean;
+      perceiveApp?: boolean;
+      screenVision?: boolean;
     }) => void) => void;
+    onSettingsChanged: (cb: (s: CompanionSettings) => void) => void;
     onPlaySound: (cb: (kind: string) => void) => void;
     onPresence: (cb: (payload: PresencePayload) => void) => void;
     onLocalLine: (cb: (text: string) => void) => void;
@@ -292,13 +329,9 @@ let companionArchetype = "curioso";
 let lastMood = "HAPPY";
 let lastAffection = 0;
 let soundMuted = false;
+let expanded = false;
 
 function syncMuteButton() {
-  const btn = document.getElementById("btnMute") as HTMLButtonElement | null;
-  if (!btn) return;
-  btn.textContent = soundMuted ? "🔇" : "🔊";
-  btn.title = soundMuted ? "Ativar sons" : "Mutar sons";
-  btn.classList.toggle("is-muted", soundMuted);
   document.body.classList.toggle("sound-muted", soundMuted);
 }
 let isCompact = false;
@@ -731,6 +764,9 @@ function applyState(state: CompanionState) {
   const affection = Math.round(state.affection);
   $<HTMLDivElement>("affectionBar").style.width = `${affection}%`;
   $<HTMLSpanElement>("affectionValue").textContent = `${affection}`;
+  const energy = Math.round(state.energy ?? 80);
+  $<HTMLDivElement>("energyBar").style.width = `${energy}%`;
+  $<HTMLSpanElement>("energyValue").textContent = `${energy}`;
   if (isHabitat) syncHabitat();
   if (state.greeting && !greetingShown) {
     greetingShown = true;
@@ -888,8 +924,14 @@ function handlePresence(p: PresencePayload) {
   applySky(p.timeOfDay);
   const listening = !!(p.listeningMusic || p.trackTitle || p.activity === "listening_music");
   document.body.classList.toggle("listening", listening);
-  const label = activityText(p);
-  setActivityUi(label);
+  if (p.screenHint || p.frontApp) {
+    const short =
+      (p.screenHint && p.screenHint.slice(0, 40)) ||
+      (p.frontApp ? `No ${p.frontApp}` : "");
+    if (short) setActivityUi(short);
+  } else {
+    setActivityUi(activityText(p));
+  }
   if (listening) {
     setMediaTrack(p.trackTitle || "Ouvindo com você…");
   } else {
@@ -902,6 +944,148 @@ function handlePresence(p: PresencePayload) {
     setTimeout(() => {
       missShown = false;
     }, 20_000);
+  }
+}
+
+function applySettingsToForm(settings: CompanionSettings) {
+  soundMuted = !!settings.soundMuted;
+  syncMuteButton();
+
+  const setCheck = (id: string, on: boolean) => {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (el) el.checked = on;
+  };
+  const setSelect = (id: string, value: string | number) => {
+    const el = document.getElementById(id) as HTMLSelectElement | null;
+    if (el) el.value = String(value);
+  };
+
+  setCheck("cfgSoundMuted", !!settings.soundMuted);
+  setCheck("cfgNotificationsMuted", !!settings.notificationsMuted);
+  setSelect("cfgNudgeInterval", settings.nudgeIntervalMin ?? 15);
+  setCheck("cfgFocusMode", !!settings.focusMode);
+  setSelect("cfgFocusHours", settings.focusHours ?? 1);
+  setCheck("cfgPranks", !!settings.pranksEnabled);
+  setCheck("cfgCompact", !!settings.compact);
+  setCheck("cfgListeningMusic", !!settings.listeningMusic);
+  setCheck("cfgRememberChats", settings.rememberChats !== false);
+  setCheck("cfgPerceiveApp", settings.perceiveApp !== false);
+  setCheck("cfgWindowTitle", settings.useWindowTitle !== false);
+  setCheck("cfgCommentMedia", settings.commentMedia !== false);
+  setCheck("cfgScreenVision", !!settings.screenVision);
+
+  const eye = document.getElementById("screenEye") as HTMLElement | null;
+  if (eye) eye.hidden = !(settings.perceiveApp !== false);
+
+  document.body.classList.toggle("focus-mode", !!settings.focusMode);
+
+  const streak = settings.streakCount ?? 0;
+  const done = settings.missions?.done ?? [];
+  const missionsExist = !!settings.missions && (done.length > 0 || !!settings.missions.day);
+  const strip = document.getElementById("missionsStrip") as HTMLElement | null;
+  if (strip) strip.hidden = !(streak > 0 || missionsExist || done.length > 0);
+
+  const streakEl = document.getElementById("missionsStreak");
+  if (streakEl) streakEl.textContent = streak > 0 ? `${streak} dias` : "";
+
+  const list = document.getElementById("missionsList");
+  if (list) {
+    list.innerHTML = "";
+    for (const id of MISSION_IDS) {
+      const li = document.createElement("li");
+      li.textContent = MISSION_LABELS[id];
+      if (done.includes(id)) li.classList.add("done");
+      list.appendChild(li);
+    }
+  }
+
+  const hint = document.getElementById("streakHint");
+  if (hint) {
+    hint.textContent =
+      streak > 0
+        ? `Sequência de ${streak} dia${streak === 1 ? "" : "s"}.`
+        : "Complete missões para manter a sequência.";
+  }
+
+  if (typeof settings.compact === "boolean") applyCompactUi(settings.compact);
+  if (typeof settings.habitat === "boolean") applyHabitatUi(settings.habitat);
+}
+
+function closeSettingsPanel() {
+  const panel = document.getElementById("settingsPanel") as HTMLElement | null;
+  if (panel) panel.hidden = true;
+}
+
+function toggleSettingsPanel() {
+  const panel = $<HTMLDivElement>("settingsPanel");
+  const opening = panel.hidden;
+  panel.hidden = !opening;
+  if (opening) {
+    const feed = document.getElementById("feedPanel") as HTMLElement | null;
+    if (feed) feed.hidden = true;
+  }
+}
+
+function bindSettingsPanel() {
+  $<HTMLButtonElement>("btnSettings").addEventListener("click", () => {
+    toggleSettingsPanel();
+  });
+  $<HTMLButtonElement>("btnCloseSettings").addEventListener("click", () => {
+    closeSettingsPanel();
+  });
+
+  const bindCheck = (id: string, key: string) => {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (!el) return;
+    el.addEventListener("change", () => {
+      void cw.companion.setSettings({ [key]: el.checked });
+    });
+  };
+  const bindSelect = (id: string, key: string, asNumber = true) => {
+    const el = document.getElementById(id) as HTMLSelectElement | null;
+    if (!el) return;
+    el.addEventListener("change", () => {
+      const raw = el.value;
+      void cw.companion.setSettings({ [key]: asNumber ? Number(raw) : raw });
+    });
+  };
+
+  bindCheck("cfgSoundMuted", "soundMuted");
+  bindCheck("cfgNotificationsMuted", "notificationsMuted");
+  bindSelect("cfgNudgeInterval", "nudgeIntervalMin");
+  bindCheck("cfgFocusMode", "focusMode");
+  bindSelect("cfgFocusHours", "focusHours");
+  bindCheck("cfgPranks", "pranksEnabled");
+  bindCheck("cfgCompact", "compact");
+  bindCheck("cfgListeningMusic", "listeningMusic");
+  bindCheck("cfgRememberChats", "rememberChats");
+  bindCheck("cfgPerceiveApp", "perceiveApp");
+  bindCheck("cfgWindowTitle", "useWindowTitle");
+  bindCheck("cfgCommentMedia", "commentMedia");
+  bindCheck("cfgScreenVision", "screenVision");
+
+  $<HTMLButtonElement>("cfgOpenHabitat").addEventListener("click", () => {
+    closeSettingsPanel();
+    void cw.companion.setHabitat(true);
+  });
+  $<HTMLButtonElement>("cfgToggleSize").addEventListener("click", () => {
+    if (isCompact) {
+      void cw.companion.setCompact(false);
+      return;
+    }
+    if (isHabitat) return;
+    expanded = !expanded;
+    document.body.classList.toggle("expanded", expanded);
+    void cw.companion.resize(expanded);
+  });
+}
+
+async function refreshSettings() {
+  try {
+    const settings = await cw.companion.getSettings();
+    applySettingsToForm(settings);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -1108,6 +1292,12 @@ async function init(options: { silent?: boolean } = {}) {
     syncMuteButton();
     applyCompactUi(!!session?.compact);
     applyHabitatUi(!!session?.habitat);
+    applySettingsToForm(session);
+    try {
+      await refreshSettings();
+    } catch {
+      /* ignore */
+    }
     try {
       const skins = await cw.companion.getSkins();
       const cfg = await cw.companion.getConfig();
@@ -1189,7 +1379,12 @@ document.addEventListener("DOMContentLoaded", () => {
         applyCompactUi(mode.compact);
         if (typeof mode.habitat === "boolean") applyHabitatUi(mode.habitat);
         if (mode.listeningMusic) setActivityUi("Ouvindo música…");
+        if (typeof mode.focusMode === "boolean") {
+          document.body.classList.toggle("focus-mode", mode.focusMode);
+        }
+        void refreshSettings();
       });
+      cw.companion.onSettingsChanged((s) => applySettingsToForm(s));
       cw.companion.onPlaySound((kind) => playActionSound(kind));
       cw.companion.onPresence((p) => handlePresence(p));
       return init();
@@ -1198,6 +1393,8 @@ document.addEventListener("DOMContentLoaded", () => {
       setLoading(false);
       showError(String(err));
     });
+
+  bindSettingsPanel();
 
   ["btnPlay", "btnPoke"].forEach((id) => {
     const btn = $<HTMLButtonElement>(id);
@@ -1225,6 +1422,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $<HTMLButtonElement>("btnFeedToggle").addEventListener("click", async () => {
     if (isCompact || isHabitat) return;
+    closeSettingsPanel();
     const feedPanel = $<HTMLDivElement>("feedPanel");
     const feedList = $<HTMLUListElement>("feedList");
     feedPanel.hidden = false;
@@ -1266,31 +1464,11 @@ document.addEventListener("DOMContentLoaded", () => {
   $<HTMLButtonElement>("btnMinimize").addEventListener("click", () => {
     void cw.companion.minimize();
   });
-  $<HTMLButtonElement>("btnMute").addEventListener("click", () => {
-    void cw.companion.setSoundMuted(!soundMuted).then((r) => {
-      soundMuted = r.soundMuted;
-      syncMuteButton();
-    });
-  });
   $<HTMLButtonElement>("btnRetry").addEventListener("click", () => {
     stopRetry();
     void init();
   });
-  let expanded = false;
-  $<HTMLButtonElement>("btnResize").addEventListener("click", () => {
-    if (isCompact) {
-      void cw.companion.setCompact(false);
-      return;
-    }
-    if (isHabitat) return;
-    expanded = !expanded;
-    document.body.classList.toggle("expanded", expanded);
-    void cw.companion.resize(expanded);
-  });
 
-  $<HTMLButtonElement>("btnHabitat").addEventListener("click", () => {
-    void cw.companion.setHabitat(true);
-  });
   $<HTMLButtonElement>("btnCloseHabitat").addEventListener("click", () => {
     void cw.companion.setHabitat(false);
   });
