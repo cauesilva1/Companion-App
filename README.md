@@ -1,21 +1,60 @@
 # Companion App
 
-Um companion virtual estilo Tamagotchi para o desktop — popup pixel art que vive no canto da tela, reage a você, escuta a música que está tocando e conversa com personalidade.
+<p align="center">
+  <img src="docs/preview/hero.png" alt="Companion App — dinos no céu" width="900" />
+</p>
 
-Feito para macOS (Electron) + API Node local.
+<p align="center">
+  <strong>Um companion virtual estilo Tamagotchi para o desktop</strong><br/>
+  Popup pixel art que vive no canto da tela, reage a você,<br/>
+  escuta a música que está tocando e conversa com personalidade.
+</p>
+
+<p align="center">
+  macOS (Electron) + API Node local
+</p>
+
+---
+
+## Os dinos
+
+Cada personalidade do quiz nasce um dino diferente:
+
+<p align="center">
+  <img src="docs/preview/dinos-lineup.png" alt="Doux, Vita, Olaf, Mort e Kuro" width="720" />
+</p>
+
+| | | | | |
+|:---:|:---:|:---:|:---:|:---:|
+| <img src="docs/preview/doux.png" width="96" /><br/>**Doux**<br/>curioso | <img src="docs/preview/vita.png" width="96" /><br/>**Vita**<br/>carinhoso | <img src="docs/preview/olaf.png" width="96" /><br/>**Olaf**<br/>preguiçoso | <img src="docs/preview/mort.png" width="96" /><br/>**Mort**<br/>zoeiro | <img src="docs/preview/kuro.png" width="96" /><br/>**Kuro**<br/>misterioso |
+
+<p align="center">
+  <img src="docs/preview/egg.png" alt="Ovo do companion" width="72" /><br/>
+  <sub>Começa no ovo — o hatch só depois do quiz</sub>
+</p>
+
+---
+
+## Céu por hora do dia
+
+Amanhecer · dia · entardecer · noite · tempestade
+
+<p align="center">
+  <img src="docs/preview/skies-strip.png" alt="Céus do companion" width="900" />
+</p>
 
 ---
 
 ## O que ele faz
 
-- **Quiz de personalidade** — responde umas perguntas e nasce um dino (Doux, Vita, Olaf, Mort ou Kuro)
+- **Quiz de personalidade** — responde umas perguntas e nasce um dino
 - **Animações pixel** — idle, corrida, pulo, dash, poke, chat e nascimento do ovo
-- **Céu por hora do dia** — amanhecer, dia, entardecer, noite (+ clima do dia)
+- **Céu dinâmico** — muda com a hora (+ clima do dia)
 - **Spotify / Apple Music** — detecta a faixa (se o app já estiver aberto) e comenta
 - **Tray + minimizar** — some pro tray e manda notificações personalizadas
-- **Chat com LLM** — NVIDIA NIM (vários modelos em cascata) → OpenRouter → voz local
+- **Chat com LLM** — NVIDIA NIM (cascata) → OpenRouter → voz local
 
-Design atual: widget arredondado, dino à esquerda no céu, painel de ações à direita.
+Design: widget arredondado, dino à esquerda no céu, painel de ações à direita.
 
 ---
 
@@ -28,6 +67,7 @@ companion-backend/
 ├── apps/desktop/        # popup Electron
 │   ├── electron/        # main / preload / Spotify
 │   └── renderer/        # UI, sprites, sons, céus
+├── docs/preview/        # imagens do README
 └── data/                # sessão local (gitignored)
 ```
 
@@ -38,7 +78,7 @@ companion-backend/
 **Requisitos:** Node.js 20+, macOS (para o desktop + mídia).
 
 ```bash
-git clone git@github.com:cauesilva1/Companion-App.git
+git clone https://github.com/cauesilva1/Companion-App.git
 cd Companion-App
 npm install
 cp .env.example .env
