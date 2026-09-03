@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Companion</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="cloud-shell" id="cloudShell">
+      <!-- Drag handle -->
+      <div class="titlebar" id="titlebar">
+        <span class="companion-name" id="companionName">...</span>
+        <span class="mood-badge" id="moodBadge">HAPPY</span>
+        <span class="activity-chip" id="activityChip" hidden></span>
+        <button class="btn-resize" id="btnHabitat" title="Abrir quarto">⌂</button>
+        <button class="btn-resize" id="btnResize" title="Alternar tamanho">⤢</button>
+        <button class="btn-resize" id="btnMinimize" title="Minimizar para o tray">−</button>
+        <button class="btn-close" id="btnClose" title="Minimizar">×</button>
+      </div>
+
+      <!-- Layout horizontal: sprite | stats + botões -->
+      <div class="body-row" id="bodyRow">
+        <div class="sprite-col">
+          <div class="sprite" id="sprite" data-mood="HAPPY">
+            <canvas class="dino-canvas" id="dinoCanvas" width="96" height="96" hidden></canvas>
+            <img class="sprite-img" id="spriteImg" alt="" hidden />
+            <div class="face" id="spriteFace">
+              <div class="eyes">
+                <div class="eye left-eye">
+                  <div class="iris"><div class="pupil"></div><div class="shine"></div></div>
+                </div>
+                <div class="eye right-eye">
+                  <div class="iris"><div class="pupil"></div><div class="shine"></div></div>
+                </div>
+              </div>
+              <div class="mouth" id="mouth"></div>
+              <div class="cheeks">
+                <div class="cheek left-cheek"></div>
+                <div class="cheek right-cheek"></div>
+              </div>
+            </div>
+            <div class="mood-particles" id="moodParticles"></div>
+          </div>
+        </div>
+
+        <div class="right-col">
+          <div class="speech-bubble" id="speechBubble" hidden>
+            <span id="speechText"></span>
+          </div>
+
+          <div class="stats">
+            <div class="stat-row">
+              <span class="stat-label">Afeto</span>
+              <div class="stat-bar-bg">
+                <div class="stat-bar affection-bar" id="affectionBar"></div>
+              </div>
+              <span class="stat-value" id="affectionValue">--</span>
+            </div>
+          </div>
+
+          <div class="media-bar" id="mediaBar" title="Só controla se Spotify/Music já estiver aberto">
+            <button type="button" class="media-btn" id="btnMediaPrev" title="Anterior">‹</button>
+            <button type="button" class="media-btn media-btn-main" id="btnMediaToggle" title="Play/Pause">▶</button>
+            <button type="button" class="media-btn" id="btnMediaNext" title="Próxima">›</button>
+            <span class="media-track" id="mediaTrack">Sem música</span>
+          </div>
+
+          <div class="actions" id="actions">
+            <button class="action-btn" id="btnPlay" data-type="PLAY" title="Brincar">
+              <span class="btn-icon">🎮</span>
+              <span class="btn-label">Play</span>
+            </button>
+            <button class="action-btn" id="btnPoke" data-type="POKE" title="Cutucar">
+              <span class="btn-icon">👆</span>
+              <span class="btn-label">Poke</span>
+            </button>
+            <button class="action-btn" id="btnChat" data-type="CHAT" title="Conversar">
+              <span class="btn-icon">💬</span>
+              <span class="btn-label">Chat</span>
+            </button>
+            <button class="action-btn btn-secondary" id="btnFeedToggle" title="Histórico">
+              <span class="btn-icon">📜</span>
+              <span class="btn-label">Log</span>
+            </button>
+          </div>
+
+          <div class="chat-input-area" id="chatInputArea" hidden>
+            <input type="text" id="chatInput" placeholder="Diga algo..." maxlength="120" />
+            <button id="btnSendChat">▶</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Habitat isométrico -->
+      <div class="habitat-panel" id="habitatPanel" hidden>
+        <div class="habitat-top">
+          <div class="habitat-identity">
+            <span class="habitat-name" id="habitatName">Companion</span>
+            <span class="habitat-pct" id="habitatPct">0%</span>
+          </div>
+          <div class="habitat-meta">
+            <span id="habitatMood">—</span>
+            <span class="habitat-activity" id="habitatActivity">Presente</span>
+          </div>
+          <button class="btn-close-feed" id="btnCloseHabitat" title="Voltar">×</button>
+        </div>
+        <div class="iso-stage">
+          <div class="iso-room">
+            <div class="iso-wall-back"></div>
+            <div class="iso-wall-side"></div>
+            <div class="iso-floor"></div>
+            <div class="iso-cab"></div>
+            <div class="iso-table"></div>
+            <div class="iso-chair"></div>
+            <div class="iso-pet" id="habitatPet" data-mood="HAPPY">
+              <canvas class="dino-canvas habitat-dino" id="habitatDinoCanvas" width="96" height="96" hidden></canvas>
+              <img class="sprite-img habitat-sprite-img" id="habitatSpriteImg" alt="" hidden />
+              <div class="face" id="habitatFace">
+                <div class="eyes">
+                  <div class="eye left-eye"><div class="iris"><div class="pupil"></div><div class="shine"></div></div></div>
+                  <div class="eye right-eye"><div class="iris"><div class="pupil"></div><div class="shine"></div></div></div>
+                </div>
+                <div class="mouth"></div>
+                <div class="cheeks">
+                  <div class="cheek left-cheek"></div>
+                  <div class="cheek right-cheek"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="media-bar habitat-media" id="habitatMediaBar">
+            <button type="button" class="media-btn" id="btnHabMediaPrev" title="Anterior">‹</button>
+            <button type="button" class="media-btn media-btn-main" id="btnHabMediaToggle" title="Play/Pause">▶</button>
+            <button type="button" class="media-btn" id="btnHabMediaNext" title="Próxima">›</button>
+            <span class="media-track" id="habitatMediaTrack">Sem música</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Painel de feed -->
+      <div class="feed-panel" id="feedPanel" hidden>
+        <div class="feed-header">
+          <span>📜 Histórico</span>
+          <button class="btn-close-feed" id="btnCloseFeed">×</button>
+        </div>
+        <ul class="feed-list" id="feedList"></ul>
+      </div>
+
+      <div class="loading-overlay" id="loadingOverlay" hidden>
+        <div class="loading-spinner"></div>
+        <span class="loading-text">Conectando...</span>
+      </div>
+
+      <div class="error-overlay" id="errorOverlay" hidden>
+        <span class="error-icon">⚠️</span>
+        <p id="errorMsg">Backend offline</p>
+        <button id="btnRetry">Tentar novamente</button>
+      </div>
+
+      <div class="quiz-overlay" id="quizOverlay">
+        <div class="quiz-card">
+          <div class="quiz-top">
+            <p class="quiz-kicker">Quem vai nascer?</p>
+            <div class="quiz-eggs" id="quizEggs" aria-hidden="true"></div>
+            <p class="quiz-progress" id="quizProgress"></p>
+          </div>
+          <h2 class="quiz-prompt" id="quizPrompt"></h2>
+          <div class="quiz-options" id="quizOptions"></div>
+          <div class="quiz-reveal" id="quizReveal" hidden>
+            <p class="quiz-blurb" id="quizBlurb"></p>
+            <label class="quiz-name-label">Nome
+              <input type="text" id="quizName" maxlength="24" />
+            </label>
+            <button type="button" id="quizConfirm">Nascer</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="../dist/renderer/renderer.js"></script>
+  </body>
+</html>

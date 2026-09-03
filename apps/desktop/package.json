@@ -1,0 +1,44 @@
+{
+  "name": "companion-desktop",
+  "version": "1.0.0",
+  "description": "Companion virtual — popup Tamagotchi para desktop",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "tsc && electron .",
+    "build": "tsc",
+    "start": "electron .",
+    "watch": "tsc --watch",
+    "pack": "tsc && electron-builder --dir",
+    "dist": "tsc && electron-builder"
+  },
+  "build": {
+    "appId": "com.companion.tamagotchi",
+    "productName": "Companion",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "renderer/**/*",
+      "assets/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.0.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0"
+  }
+}

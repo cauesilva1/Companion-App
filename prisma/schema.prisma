@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Mood {
+  EXCITED
+  HAPPY
+  CONTENT
+  BORED
+  SLEEPY
+  SAD
+  LONELY
+}
+
+enum InteractionType {
+  POKE
+  FEED
+  CHAT
+  PLAY
+  IGNORE_CHECK // gerado pelo sistema quando o usuario some por muito tempo
+}
+
+model User {
+  id         String      @id @default(cuid())
+  email      String      @unique
+  createdAt  DateTime    @default(now())
+  companions Companion[]
+}
+
+model Companion {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  name         String
+  personality  String        // ex: "curioso", "preguicoso", "carinhoso" - usado no prompt da IA
+  skin         String        @default("default") // qual "ooi"/skin visual esta usando
+
+  mood         Mood          @default(CONTENT)
+  energy       Int           @default(80) // 0-100
+  affection    Int           @default(0)  // 0-100, sobe com boas interacoes
+
+  lastDecayAt  DateTime      @default(now()) // ultima vez que aplicamos decay de tempo
+  lastInteractionAt DateTime @default(now())
+
+  createdAt    DateTime      @default(now())
+  interactions Interaction[]
+
+  @@index([userId])
+}
+
+model Interaction {
+  id            String          @id @default(cuid())
+  companionId   String
+  companion     Companion       @relation(fields: [companionId], references: [id])
+
+  type          InteractionType
+  userMessage   String?         // so preenchido em CHAT
+  reactionText  String          // o que o companion "respondeu"
+
+  moodAfter     Mood
+  energyAfter   Int
+  affectionAfter Int
+
+  createdAt     DateTime        @default(now())
+
+  @@index([companionId, createdAt])
+}

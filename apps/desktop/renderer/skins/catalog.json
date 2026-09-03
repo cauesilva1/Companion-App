@@ -1,0 +1,7 @@
+[
+  {"id":"dino-doux","name":"Doux","folder":"doux","source":"arks-dino-characters","license":"itch","render":"sprite","sprite":{"idle":"assets/dinos/doux/base/idle.png"},"unlock":"starter","pixel":true,"url":"https://arks.itch.io/dino-characters"},
+  {"id":"dino-vita","name":"Vita","folder":"vita","source":"arks-dino-characters","license":"itch","render":"sprite","sprite":{"idle":"assets/dinos/vita/base/idle.png"},"unlock":"starter","pixel":true,"url":"https://arks.itch.io/dino-characters"},
+  {"id":"dino-olaf","name":"Olaf","folder":"olaf","source":"arks-dino-characters","license":"itch","render":"sprite","sprite":{"idle":"assets/dinos/olaf/base/idle.png"},"unlock":"starter","pixel":true,"url":"https://arks.itch.io/dino-characters"},
+  {"id":"dino-mort","name":"Mort","folder":"mort","source":"arks-dino-characters","license":"itch","render":"sprite","sprite":{"idle":"assets/dinos/mort/base/idle.png"},"unlock":"starter","pixel":true,"url":"https://arks.itch.io/dino-characters"},
+  {"id":"dino-kuro","name":"Kuro","folder":"kuro","source":"arks-dino-characters","license":"itch","render":"sprite","sprite":{"idle":"assets/dinos/kuro/base/idle.png"},"unlock":"starter","pixel":true,"url":"https://arks.itch.io/dino-characters"}
+]
