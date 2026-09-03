@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("companion", {
   getSkins: () => ipcRenderer.invoke("companion:getSkins"),
   notify: (title: string, body: string) => ipcRenderer.invoke("companion:notify", title, body),
   minimize: () => ipcRenderer.invoke("companion:minimize"),
+  setSoundMuted: (on: boolean) => ipcRenderer.invoke("companion:setSoundMuted", on),
   resize: (expanded: boolean) => ipcRenderer.invoke("companion:resize", expanded),
   setSkin: (skin: string) => ipcRenderer.invoke("companion:setSkin", skin),
   media: (cmd: "prev" | "toggle" | "next") => ipcRenderer.invoke("companion:media", cmd),

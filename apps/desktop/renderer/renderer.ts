@@ -230,6 +230,7 @@ interface CompanionWindow {
     getConfig: () => Promise<{ skin?: string; companionId?: string }>;
     notify: (title: string, body: string) => Promise<void>;
     minimize: () => Promise<{ ok: boolean }>;
+    setSoundMuted: (on: boolean) => Promise<{ soundMuted: boolean }>;
     resize: (expanded: boolean) => Promise<void>;
     setSkin: (skin: string) => Promise<SkinView | undefined>;
     media: (cmd: "prev" | "toggle" | "next") => Promise<{
@@ -291,6 +292,15 @@ let companionArchetype = "curioso";
 let lastMood = "HAPPY";
 let lastAffection = 0;
 let soundMuted = false;
+
+function syncMuteButton() {
+  const btn = document.getElementById("btnMute") as HTMLButtonElement | null;
+  if (!btn) return;
+  btn.textContent = soundMuted ? "🔇" : "🔊";
+  btn.title = soundMuted ? "Ativar sons" : "Mutar sons";
+  btn.classList.toggle("is-muted", soundMuted);
+  document.body.classList.toggle("sound-muted", soundMuted);
+}
 let isCompact = false;
 let isHabitat = false;
 let greetingShown = false;
@@ -1095,6 +1105,7 @@ async function init(options: { silent?: boolean } = {}) {
     console.log("[renderer] session", session);
     if (session?.companionId) companionIdForHatch = session.companionId;
     if (session?.soundMuted !== undefined) soundMuted = session.soundMuted;
+    syncMuteButton();
     applyCompactUi(!!session?.compact);
     applyHabitatUi(!!session?.habitat);
     try {
@@ -1174,6 +1185,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       cw.companion.onModeChanged((mode) => {
         soundMuted = mode.soundMuted;
+        syncMuteButton();
         applyCompactUi(mode.compact);
         if (typeof mode.habitat === "boolean") applyHabitatUi(mode.habitat);
         if (mode.listeningMusic) setActivityUi("Ouvindo música…");
@@ -1253,6 +1265,12 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $<HTMLButtonElement>("btnMinimize").addEventListener("click", () => {
     void cw.companion.minimize();
+  });
+  $<HTMLButtonElement>("btnMute").addEventListener("click", () => {
+    void cw.companion.setSoundMuted(!soundMuted).then((r) => {
+      soundMuted = r.soundMuted;
+      syncMuteButton();
+    });
   });
   $<HTMLButtonElement>("btnRetry").addEventListener("click", () => {
     stopRetry();

@@ -46,7 +46,9 @@ let companionId = "";
 let currentSkinId = "dino-doux";
 let lastAlert = "";
 let mainWindow: BrowserWindow | null = null;
+let toastWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let toastHideTimer: ReturnType<typeof setTimeout> | null = null;
 let quizMode = false;
 let compact = false;
 let habitatMode = false;
@@ -68,7 +70,95 @@ let lastNotifiedTrack = "";
 let batteryLowWarned = false;
 let windowMinimized = false;
 let lastMinimizedNudgeAt = 0;
+let isQuitting = false;
 const IDLE_THRESHOLD_MIN = 3;
+
+/** Ícone do companion (dino recortado) — tray, toast e notificação nativa. */
+function buildCompanionImage(size: number): Electron.NativeImage {
+  const candidates = [
+    path.join(__dirname, `../../renderer/assets/skins/${currentSkinId}/idle.png`),
+    path.join(__dirname, "../../renderer/assets/skins/dino-doux/idle.png"),
+  ];
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    let img = nativeImage.createFromPath(file);
+    if (img.isEmpty()) continue;
+    try {
+      const { width, height } = img.getSize();
+      const buf = img.toBitmap();
+      let minX = width;
+      let minY = height;
+      let maxX = 0;
+      let maxY = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          const b = buf[i];
+          const g = buf[i + 1];
+          const r = buf[i + 2];
+          const a = buf[i + 3];
+          if (a < 8) continue;
+          if (r <= 10 && g <= 10 && b <= 10) continue;
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+      if (maxX > minX && maxY > minY) {
+        const pad = 4;
+        img = img.crop({
+          x: Math.max(0, minX - pad),
+          y: Math.max(0, minY - pad),
+          width: Math.min(width - Math.max(0, minX - pad), maxX - minX + 1 + pad * 2),
+          height: Math.min(height - Math.max(0, minY - pad), maxY - minY + 1 + pad * 2),
+        });
+      }
+    } catch {
+      /* mantém original */
+    }
+    return img.resize({ width: size, height: size, quality: "best" });
+  }
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  return nativeImage.createFromBuffer(png).resize({ width: size, height: size });
+}
+
+function buildTrayImage(): Electron.NativeImage {
+  return buildCompanionImage(22);
+}
+
+function companionIconDataUrl(size = 72): string {
+  const png = buildCompanionImage(size).toPNG();
+  return `data:image/png;base64,${png.toString("base64")}`;
+}
+
+function updateTrayIcon() {
+  if (!tray) return;
+  tray.setImage(buildTrayImage());
+  tray.setToolTip(companionName || "Companion");
+}
+
+function showMainWindow() {
+  if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  windowMinimized = false;
+  if (process.platform === "darwin") {
+    app.show();
+    app.dock?.show();
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  if (process.platform === "darwin") {
+    app.focus({ steal: true });
+  }
+}
 
 function loadSession() {
   try {
@@ -123,26 +213,26 @@ function fetchJSON<T>(
     const transport = isHttps ? https : http;
     const req = transport.request(
       {
-        hostname: parsed.hostname,
-        port: parsed.port || (isHttps ? 443 : 80),
-        path: parsed.pathname + parsed.search,
-        method: options.method ?? "GET",
-        headers: { "Content-Type": "application/json" },
+      hostname: parsed.hostname,
+      port: parsed.port || (isHttps ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: options.method ?? "GET",
+      headers: { "Content-Type": "application/json" },
       },
       (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
           if (res.statusCode && res.statusCode >= 400) {
             reject(new Error(data || `HTTP ${res.statusCode}`));
             return;
           }
-          try {
-            resolve(JSON.parse(data) as T);
-          } catch {
-            reject(new Error(`Resposta inválida: ${data}`));
-          }
-        });
+        try {
+          resolve(JSON.parse(data) as T);
+        } catch {
+          reject(new Error(`Resposta inválida: ${data}`));
+        }
+      });
       }
     );
     req.on("error", reject);
@@ -157,6 +247,7 @@ function applySkinToWindow() {
     id: currentSkinId,
     skin,
   });
+  updateTrayIcon();
 }
 
 function windowSize(): { w: number; h: number } {
@@ -317,16 +408,163 @@ function placeWindow(opts?: { preservePos?: boolean }) {
   emitPresence();
 }
 
-function showCompanionNotification(title: string, body: string) {
-  if (!Notification.isSupported()) return;
-  const n = new Notification({ title, body, silent: soundMuted });
-  n.on("click", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    windowMinimized = false;
-    mainWindow.show();
-    mainWindow.focus();
+/** Toast próprio — no macOS a notificação nativa falha fácil (sem assinatura / foco / permissão). */
+function showFallbackToast(title: string, body: string) {
+  const work = screen.getPrimaryDisplay().workArea;
+  const w = 360;
+  const h = 104;
+  const x = work.x + work.width - w - 20;
+  const y = work.y + 24;
+
+  if (toastHideTimer) {
+    clearTimeout(toastHideTimer);
+    toastHideTimer = null;
+  }
+
+  if (!toastWindow || toastWindow.isDestroyed()) {
+    toastWindow = new BrowserWindow({
+      width: w,
+      height: h,
+      x,
+      y,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      resizable: false,
+      skipTaskbar: true,
+      focusable: true,
+      hasShadow: false,
+      show: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    toastWindow.setAlwaysOnTop(true, "floating");
+    toastWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    toastWindow.on("closed", () => {
+      toastWindow = null;
+    });
+    toastWindow.on("page-title-updated", (e, nextTitle) => {
+      if (nextTitle !== "companion-toast-click") return;
+      e.preventDefault();
+      if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide();
+      showMainWindow();
+    });
+  } else {
+    toastWindow.setBounds({ x, y, width: w, height: h });
+  }
+
+  const safeTitle = escapeHtml(title);
+  const safeBody = escapeHtml(body);
+  const avatar = companionIconDataUrl(96);
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8" />
+<style>
+  html, body { margin:0; background:transparent; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; overflow:hidden; }
+  .toast {
+    margin: 6px; padding: 10px 12px; border-radius: 16px;
+    display: flex; gap: 12px; align-items: center;
+    background: linear-gradient(145deg, rgba(28,32,48,.96), rgba(18,20,30,.96));
+    color: #f4f4f8;
+    box-shadow: 0 12px 32px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+    border: 1px solid rgba(167, 139, 250, .28);
+    cursor: pointer; user-select: none;
+  }
+  .avatar-wrap {
+    width: 56px; height: 56px; flex-shrink: 0;
+    border-radius: 14px;
+    background: radial-gradient(circle at 40% 35%, #7dd3fc 0%, #1e3a5f 70%);
+    border: 1px solid rgba(255,255,255,.18);
+    display: grid; place-items: center;
+    overflow: hidden;
+  }
+  .avatar {
+    width: 48px; height: 48px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  .copy { min-width: 0; flex: 1; }
+  .eyebrow {
+    font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
+    color: #c4b5fd; margin-bottom: 2px; font-weight: 700;
+  }
+  .title { font-weight: 700; font-size: 13px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .body { font-size: 12px; line-height: 1.35; opacity: .9; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+</style></head>
+<body>
+  <div class="toast" id="t">
+    <div class="avatar-wrap"><img class="avatar" src="${avatar}" alt="" /></div>
+    <div class="copy">
+      <div class="eyebrow">Companion</div>
+      <div class="title">${safeTitle}</div>
+      <div class="body">${safeBody}</div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('t').addEventListener('click', () => {
+      document.title = 'companion-toast-click';
+    });
+  </script>
+</body></html>`;
+
+  void toastWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  toastWindow.once("ready-to-show", () => {
+    if (!toastWindow || toastWindow.isDestroyed()) return;
+    toastWindow.showInactive();
   });
-  n.show();
+
+  toastHideTimer = setTimeout(() => {
+    if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide();
+    toastHideTimer = null;
+  }, 5500);
+}
+
+function escapeHtml(s: string) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function showCompanionNotification(title: string, body: string, opts?: { forceToast?: boolean }) {
+  const forceToast = opts?.forceToast ?? windowMinimized;
+
+  // Toast próprio sempre que estiver minimizado — confiável no macOS
+  if (forceToast) {
+    showFallbackToast(title, body);
+    if (process.platform === "darwin") {
+      try {
+        app.dock?.bounce("informational");
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  if (!Notification.isSupported()) {
+    if (!forceToast) showFallbackToast(title, body);
+    return;
+  }
+
+  try {
+    const n = new Notification({
+      title,
+      body,
+      icon: buildCompanionImage(128),
+      silent: soundMuted,
+    });
+    n.on("click", () => showMainWindow());
+    n.on("failed", (_e, err) => {
+      console.warn("[desktop] notificação nativa falhou:", err);
+      if (!forceToast) showFallbackToast(title, body);
+    });
+    n.show();
+  } catch (err) {
+    console.warn("[desktop] notificação nativa erro:", err);
+    if (!forceToast) showFallbackToast(title, body);
+  }
 }
 
 function pickMinimizedNudge(): string {
@@ -370,17 +608,30 @@ function minimizeToTray() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   windowMinimized = true;
   mainWindow.hide();
-  showCompanionNotification(companionName, "Tô no tray. Clica aqui ou no ícone pra voltar.");
+  updateTrayIcon();
+  // No macOS, banner nativo some se o app ainda estiver em foco —
+  // esconde o app e atrasa um pouco a notificação.
+  if (process.platform === "darwin") {
+    app.hide();
+  }
+  setTimeout(() => {
+    showCompanionNotification(
+      companionName,
+      "Tô no tray (barra de menus). Clica no ícone do dino, no toast ou no Dock pra voltar.",
+      { forceToast: true }
+    );
+  }, 450);
 }
 
 function toggleVisibility() {
-  if (!mainWindow) return;
-  if (mainWindow.isVisible()) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    showMainWindow();
+    return;
+  }
+  if (mainWindow.isVisible() && !windowMinimized) {
     minimizeToTray();
   } else {
-    windowMinimized = false;
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
   }
 }
 
@@ -434,21 +685,11 @@ async function importCompanions() {
 
 function rebuildTray() {
   if (!tray) return;
+  updateTrayIcon();
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      {
-        label: "Mostrar Companion",
-        click: () => {
-          mainWindow?.show();
-          mainWindow?.focus();
-        },
-      },
+      { label: "Mostrar Companion", click: () => showMainWindow() },
       { label: "Esconder / minimizar", click: () => minimizeToTray() },
-      { label: "Mostrar", click: () => {
-        windowMinimized = false;
-        mainWindow?.show();
-        mainWindow?.focus();
-      } },
       {
         label: compact ? "Expandir" : "Modo mínimo",
         click: () => {
@@ -524,16 +765,31 @@ function rebuildTray() {
         },
       },
       { type: "separator" },
-      { label: "Sair", click: () => app.quit() },
+      {
+        label: "Sair",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
     ])
   );
 }
 
 function createTray() {
-  tray = new Tray(nativeImage.createEmpty());
-  tray.setToolTip("Companion");
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+  tray = new Tray(buildTrayImage());
+  tray.setToolTip(companionName || "Companion");
   rebuildTray();
-  tray.on("click", () => toggleVisibility());
+  // macOS: com context menu, clique esquerdo abre o menu; double-click / click ainda ajudam
+  tray.on("click", () => showMainWindow());
+  tray.on("double-click", () => showMainWindow());
+  tray.on("right-click", () => {
+    tray?.popUpContextMenu();
+  });
 }
 
 function playTeaseSound() {
@@ -579,11 +835,11 @@ async function runPrank(kind: PrankKind) {
       playTeaseSound();
       break;
     case "hide-and-seek": {
+      windowMinimized = true;
       mainWindow.hide();
       setTimeout(() => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
-        mainWindow.show();
-        windowMinimized = false;
+        showMainWindow();
         showCompanionNotification(companionName, "Achei! 👀");
       }, 5000);
       break;
@@ -635,6 +891,12 @@ function createWindow() {
   });
   mainWindow.on("show", () => {
     windowMinimized = false;
+  });
+  // × do sistema / Cmd+W não deve matar o app — volta pro tray
+  mainWindow.on("close", (e) => {
+    if (isQuitting) return;
+    e.preventDefault();
+    minimizeToTray();
   });
   mainWindow.webContents.on("did-finish-load", () => {
     applySkinToWindow();
@@ -763,17 +1025,17 @@ ipcMain.handle("companion:interact", async (_e, type: string, message?: string) 
   try {
     touchUserActivity(type);
     const body: Record<string, unknown> = { type, pranksEnabled };
-    if (message) body.message = message;
+      if (message) body.message = message;
     const data = (await fetchJSON(`/companion/${companionId}/interact`, {
-      method: "POST",
-      body,
+        method: "POST",
+        body,
     })) as { prank?: PrankKind; companion?: { name?: string } };
     if (data.companion?.name) companionName = data.companion.name;
     if (data.prank) void runPrank(data.prank);
-    return { ok: true, data };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
+      return { ok: true, data };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
 });
 
 ipcMain.handle("companion:getFeed", async (_e, limit = 20) => {
@@ -850,6 +1112,14 @@ ipcMain.handle("companion:minimize", () => {
   return { ok: true };
 });
 
+ipcMain.handle("companion:setSoundMuted", (_e, on: boolean) => {
+  soundMuted = !!on;
+  saveSession();
+  emitMode();
+  rebuildTray();
+  return { soundMuted };
+});
+
 ipcMain.handle("companion:runPrank", async (_e, kind: PrankKind) => {
   await runPrank(kind);
   return { ok: true };
@@ -876,8 +1146,13 @@ app.whenReady().then(async () => {
   minimizedNotifyTimer = setInterval(() => maybeMinimizedNudge(), 5 * 60_000);
   nativeTheme.on("updated", () => emitPresence());
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // Dock click: janela escondida ainda existe — precisa show, não create
+    showMainWindow();
   });
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
 });
 
 app.on("will-quit", () => {
@@ -885,9 +1160,19 @@ app.on("will-quit", () => {
   if (prankTimer) clearInterval(prankTimer);
   if (presenceTimer) clearInterval(presenceTimer);
   if (minimizedNotifyTimer) clearInterval(minimizedNotifyTimer);
+  if (toastHideTimer) clearTimeout(toastHideTimer);
+  if (toastWindow && !toastWindow.isDestroyed()) {
+    toastWindow.destroy();
+    toastWindow = null;
+  }
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
   saveSession();
 });
 
 app.on("window-all-closed", () => {
+  // macOS: fica vivo no tray/Dock mesmo sem janela visível
   if (process.platform !== "darwin") app.quit();
 });
