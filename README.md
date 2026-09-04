@@ -55,6 +55,7 @@ Amanhecer · dia · entardecer · noite · tempestade
 - **Chat com LLM** — DeepSeek / NVIDIA → OpenRouter → voz local
 - **Clima real** — temperatura da sua região (não inventa graus)
 - **Build DMG** — app standalone com API embutida
+- **iOS (SwiftUI)** — widget, lock screen e Dynamic Island (`apps/ios`)
 
 Design: widget arredondado, dino à esquerda no céu, painel de ações à direita.
 
@@ -69,7 +70,8 @@ companion-backend/
 ├── apps/desktop/        # popup Electron
 │   ├── electron/        # main / preload / Spotify
 │   └── renderer/        # UI, sprites, sons, céus
-├── scripts/             # prepare bundle + make-dmg
+├── apps/ios/            # app SwiftUI + Widget + Dynamic Island
+├── scripts/             # prepare bundle, make-dmg, generate-ios
 ├── docs/preview/        # imagens do README
 └── data/                # sessão local (gitignored)
 ```
@@ -160,6 +162,22 @@ npm run prepare:desktop
 npm run build --workspace=companion-desktop
 npm run pack --workspace=companion-desktop
 ```
+
+---
+
+## iOS (SwiftUI)
+
+App nativo com **widget**, **tela de bloqueio** e **Dynamic Island** (Live Activities).  
+Código em [`apps/ios/`](apps/ios/) — detalhes em [`apps/ios/README.md`](apps/ios/README.md).
+
+**Requisitos:** Xcode 15+, iOS 16.2+, API local (`npm run dev:api`).
+
+```bash
+./scripts/generate-ios-project.sh   # precisa do XcodeGen
+open apps/ios/Companion.xcodeproj
+```
+
+No app: informe o Companion ID (do desktop) se necessário; em device físico use o IP do Mac como API base (`http://192.168.x.x:3333`).
 
 ---
 

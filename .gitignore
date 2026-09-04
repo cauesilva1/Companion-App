@@ -54,3 +54,7 @@ out/
 coverage/
 .cache/
 .turbo/
+
+# Xcode
+**/xcuserdata/
+**/*.xcuserstate

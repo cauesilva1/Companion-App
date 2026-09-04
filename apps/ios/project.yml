@@ -1,0 +1,57 @@
+name: Companion
+options:
+  bundleIdPrefix: com.companion
+  deploymentTarget:
+    iOS: "16.2"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  SWIFT_VERSION: "5.9"
+  TARGETED_DEVICE_FAMILY: "1"
+  IPHONEOS_DEPLOYMENT_TARGET: "16.2"
+  DEVELOPMENT_TEAM: ""
+  CODE_SIGN_STYLE: Automatic
+
+targets:
+  Companion:
+    type: application
+    platform: iOS
+    sources:
+      - path: Companion
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.companion.tamagotchi
+        PRODUCT_NAME: Companion
+        INFOPLIST_FILE: Companion/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_KEY_CFBundleDisplayName: Companion
+        CODE_SIGN_ENTITLEMENTS: Companion/Companion.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0
+    dependencies:
+      - target: CompanionWidget
+        embed: true
+    scheme:
+      testTargets: []
+
+  CompanionWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: CompanionWidget
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.companion.tamagotchi.widget
+        PRODUCT_NAME: CompanionWidget
+        INFOPLIST_FILE: CompanionWidget/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        CODE_SIGN_ENTITLEMENTS: CompanionWidget/CompanionWidget.entitlements
+        SKIP_INSTALL: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0
+    dependencies: []
+    scheme: {}
