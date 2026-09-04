@@ -167,80 +167,54 @@
           <button class="btn-close-feed" id="btnCloseSettings">×</button>
         </div>
         <div class="settings-body">
-          <section class="settings-section">
-            <h3>Sons</h3>
-            <label class="settings-row"><span>Mutar SFX</span>
-              <input type="checkbox" id="cfgSoundMuted" />
-            </label>
-          </section>
-          <section class="settings-section">
-            <h3>Notificações</h3>
-            <label class="settings-row"><span>Mutar toasts / nudges</span>
-              <input type="checkbox" id="cfgNotificationsMuted" />
-            </label>
-            <label class="settings-row"><span>Frequência dos nudges</span>
-              <select id="cfgNudgeInterval">
-                <option value="5">5 min</option>
-                <option value="15">15 min</option>
-                <option value="30">30 min</option>
-              </select>
-            </label>
-            <label class="settings-row"><span>Modo foco</span>
-              <input type="checkbox" id="cfgFocusMode" />
-            </label>
-            <label class="settings-row"><span>Duração do foco</span>
-              <select id="cfgFocusHours">
-                <option value="1">1 hora</option>
-                <option value="2">2 horas</option>
-              </select>
-            </label>
-          </section>
-          <section class="settings-section">
-            <h3>Comportamento</h3>
-            <label class="settings-row"><span>Pegadinhas</span>
-              <input type="checkbox" id="cfgPranks" />
-            </label>
-            <label class="settings-row"><span>Modo mínimo</span>
-              <input type="checkbox" id="cfgCompact" />
-            </label>
-            <div class="settings-actions">
-              <button type="button" class="settings-btn" id="cfgOpenHabitat">Abrir quarto</button>
-              <button type="button" class="settings-btn" id="cfgToggleSize">Alternar tamanho</button>
-            </div>
-          </section>
-          <section class="settings-section">
-            <h3>Mídia</h3>
-            <label class="settings-row"><span>Ouvindo música (manual)</span>
-              <input type="checkbox" id="cfgListeningMusic" />
-            </label>
-          </section>
-          <section class="settings-section">
-            <h3>Memória</h3>
-            <label class="settings-row"><span>Lembrar conversas</span>
-              <input type="checkbox" id="cfgRememberChats" checked />
-            </label>
-          </section>
-          <section class="settings-section">
-            <h3>Consciência</h3>
-            <label class="settings-row"><span>Perceber app ativo</span>
-              <input type="checkbox" id="cfgPerceiveApp" checked />
-            </label>
-            <label class="settings-row"><span>Usar título da janela</span>
-              <input type="checkbox" id="cfgWindowTitle" checked />
-            </label>
-            <label class="settings-row"><span>Comentar mídia / leitura</span>
-              <input type="checkbox" id="cfgCommentMedia" checked />
-            </label>
-            <label class="settings-row"><span>Pode olhar a tela (vision)</span>
-              <input type="checkbox" id="cfgScreenVision" />
-            </label>
-            <p class="settings-hint">Vision fica off por padrão. Captura real entra depois; por enquanto só prepara a preferência.</p>
-          </section>
-          <section class="settings-section" id="missionsSection">
-            <h3>Missões de hoje</h3>
-            <ul class="missions-list" id="missionsList"></ul>
-            <p class="settings-hint" id="streakHint"></p>
-          </section>
+          <div class="settings-grid">
+            <section class="settings-card">
+              <h3>Geral</h3>
+              <label class="settings-row"><span>Mutar sons</span><input type="checkbox" id="cfgSoundMuted" class="toggle" /></label>
+              <label class="settings-row"><span>Pegadinhas</span><input type="checkbox" id="cfgPranks" class="toggle" /></label>
+              <label class="settings-row"><span>Modo mínimo</span><input type="checkbox" id="cfgCompact" class="toggle" /></label>
+              <label class="settings-row"><span>Música manual</span><input type="checkbox" id="cfgListeningMusic" class="toggle" /></label>
+              <div class="settings-actions">
+                <button type="button" class="settings-btn" id="cfgOpenHabitat">Quarto</button>
+                <button type="button" class="settings-btn" id="cfgToggleSize">Tamanho</button>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <h3>Notificações</h3>
+              <label class="settings-row"><span>Silenciar</span><input type="checkbox" id="cfgNotificationsMuted" class="toggle" /></label>
+              <label class="settings-row"><span>Frequência</span>
+                <select id="cfgNudgeInterval">
+                  <option value="5">5 min</option>
+                  <option value="15">15 min</option>
+                  <option value="30">30 min</option>
+                </select>
+              </label>
+              <label class="settings-row"><span>Modo foco</span><input type="checkbox" id="cfgFocusMode" class="toggle" /></label>
+              <label class="settings-row"><span>Duração</span>
+                <select id="cfgFocusHours">
+                  <option value="1">1 h</option>
+                  <option value="2">2 h</option>
+                </select>
+              </label>
+            </section>
+
+            <section class="settings-card">
+              <h3>Presença</h3>
+              <label class="settings-row"><span>Lembrar chat</span><input type="checkbox" id="cfgRememberChats" class="toggle" checked /></label>
+              <label class="settings-row"><span>App ativo</span><input type="checkbox" id="cfgPerceiveApp" class="toggle" checked /></label>
+              <label class="settings-row"><span>Título da janela</span><input type="checkbox" id="cfgWindowTitle" class="toggle" checked /></label>
+              <label class="settings-row"><span>Comentar mídia</span><input type="checkbox" id="cfgCommentMedia" class="toggle" checked /></label>
+              <label class="settings-row"><span>Olhar tela</span><input type="checkbox" id="cfgScreenVision" class="toggle" /></label>
+              <p class="settings-hint">“Olhar tela” fica off. Sem captura ainda — só a preferência.</p>
+            </section>
+
+            <section class="settings-card" id="missionsSection">
+              <h3>Hoje</h3>
+              <p class="settings-hint" id="streakHint"></p>
+              <ul class="missions-list" id="missionsList"></ul>
+            </section>
+          </div>
         </div>
       </div>
 

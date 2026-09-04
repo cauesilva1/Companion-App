@@ -38,8 +38,16 @@ interface StoreFile {
   interactions: StoredInteraction[];
 }
 
-const DATA_DIR = path.join(__dirname, "../data");
-const DATA_FILE = path.join(DATA_DIR, "companions.json");
+function resolveDataDir(): string {
+  if (process.env.COMPANION_DATA_DIR) {
+    return path.resolve(process.env.COMPANION_DATA_DIR);
+  }
+  return path.join(__dirname, "../data");
+}
+
+function dataFile(): string {
+  return path.join(resolveDataDir(), "companions.json");
+}
 
 function emptyStore(): StoreFile {
   return { companions: [], interactions: [] };
@@ -47,16 +55,18 @@ function emptyStore(): StoreFile {
 
 export function loadStore(): StoreFile {
   try {
-    if (!fs.existsSync(DATA_FILE)) return emptyStore();
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")) as StoreFile;
+    const file = dataFile();
+    if (!fs.existsSync(file)) return emptyStore();
+    return JSON.parse(fs.readFileSync(file, "utf8")) as StoreFile;
   } catch {
     return emptyStore();
   }
 }
 
 export function saveStore(store: StoreFile): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), "utf8");
+  const dir = resolveDataDir();
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(dataFile(), JSON.stringify(store, null, 2), "utf8");
 }
 
 export function toCompanion(row: StoredCompanion) {

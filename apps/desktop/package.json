@@ -8,24 +8,42 @@
     "build": "tsc",
     "start": "electron .",
     "watch": "tsc --watch",
-    "pack": "tsc && electron-builder --dir",
-    "dist": "tsc && electron-builder"
+    "prepare:bundle": "node ../../scripts/prepare-desktop-bundle.mjs",
+    "pack": "npm run prepare:bundle && tsc && electron-builder --mac dir",
+    "dist": "npm run dist:mac",
+    "dist:mac": "npm run prepare:bundle && tsc && electron-builder --mac dir && node ../../scripts/make-dmg.mjs"
   },
   "build": {
     "appId": "com.companion.tamagotchi",
     "productName": "Companion",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
       "renderer/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "resources/api",
+        "to": "api"
+      },
+      {
+        "from": "resources/.env",
+        "to": ".env"
+      }
+    ],
+    "icon": "build/icon.png",
+    "electronVersion": "31.7.7",
     "mac": {
       "category": "public.app-category.entertainment",
-      "target": "dmg"
+      "target": ["dir"],
+      "identity": null
     },
+    "npmRebuild": false,
     "win": {
       "target": "nsis"
     }
@@ -34,7 +52,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^31.0.0",
+    "electron": "31.7.7",
     "electron-builder": "^24.0.0",
     "typescript": "^5.5.0"
   },

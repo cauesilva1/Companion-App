@@ -1,5 +1,11 @@
 import { InteractionType, Mood } from "@prisma/client";
 import { localReaction, LocalVoiceParams } from "./localVoice";
+import {
+  getWeatherSnapshot,
+  isWeatherQuestion,
+  weatherContextLine,
+  weatherSpokenLine,
+} from "./weather";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "openrouter/auto";
@@ -8,19 +14,23 @@ const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_MODELS: string[] = (
   process.env.NVIDIA_MODELS ??
   [
-    "openai/gpt-oss-20b",
-    "moonshotai/kimi-k3",
-    "nvidia/nemotron-3-super-120b-a12b",
     "deepseek-ai/deepseek-v4-pro-0813",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "moonshotai/kimi-k3",
+    "openai/gpt-oss-20b",
   ].join(",")
 )
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? NVIDIA_MODELS[0] ?? "openai/gpt-oss-20b";
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? NVIDIA_MODELS[0] ?? "deepseek-ai/deepseek-v4-pro-0813";
+/** Primário + no máximo 1 fallback NVIDIA (evita cascata de 4×14s). */
+const NVIDIA_TRY_MODELS = Array.from(
+  new Set([NVIDIA_MODEL, NVIDIA_MODELS[1]].filter(Boolean) as string[])
+).slice(0, 2);
 const MAX_TOKENS = 80;
 const CHAT_CACHE_MS = 30_000;
-const LLM_TIMEOUT_MS = 14_000;
+const LLM_TIMEOUT_MS = 10_000;
 
 interface ChatTurn {
   role: "user" | "assistant";
@@ -42,6 +52,7 @@ export interface ReactionParams {
   history?: ChatTurn[];
   memoryNotes?: string[];
   screenHint?: string;
+  weatherHint?: string;
 }
 
 interface ChatMessage {
@@ -79,7 +90,7 @@ const ARCH_TONE: Record<string, string> = {
 };
 
 const BAD_LINE =
-  /user\s*says|thinking|analyze|user input|current mood|personality:|energy:|here's a|here is a|as an ai|contexto:|vinculo|step\s*\d|fale agora|so a frase|só a frase|o usuario|o usuário|mensagem do|system:|assistant:/i;
+  /user\s*says|thinking|analyze|user input|current mood|personality:|energy:|here's a|here is a|as an ai|contexto:|vinculo|step\s*\d|fale agora|so a frase|só a frase|o usuario|o usuário|mensagem do|system:|assistant:|they'?re asking|the user|okay,? the user|let me check|embedded interaction|assistant role|respond in portuguese/i;
 
 const chatCache = new Map<string, { text: string; at: number }>();
 
@@ -88,7 +99,15 @@ function cacheKey(companionId: string | undefined, message: string) {
 }
 
 function buildMessages(params: ReactionParams): ChatMessage[] {
-  const { companion, mood, userMessage, history = [], memoryNotes, screenHint } = params;
+  const {
+    companion,
+    mood,
+    userMessage,
+    history = [],
+    memoryNotes,
+    screenHint,
+    weatherHint,
+  } = params;
   const arch = companion.archetype ?? "curioso";
   const tone = ARCH_TONE[arch] ?? ARCH_TONE.curioso;
 
@@ -98,7 +117,7 @@ function buildMessages(params: ReactionParams): ChatMessage[] {
     `Estilo visual (tom): ${companion.artStyle ?? "cartoon"}.`,
     `Humor agora: ${MOOD_LABELS[mood]}.`,
     tone,
-    `Responda em portugues do Brasil, primeira pessoa, no maximo 12 palavras.`,
+    `Responda em portugues do Brasil, primeira pessoa, no maximo 14 palavras.`,
     `Apenas a fala. Sem aspas, sem ingles, sem explicar, sem repetir o pedido.`,
   ];
   if (memoryNotes?.length) {
@@ -106,6 +125,10 @@ function buildMessages(params: ReactionParams): ChatMessage[] {
   }
   if (screenHint) {
     systemParts.push(`Contexto da tela do usuario agora: ${screenHint}`);
+  }
+  if (weatherHint) {
+    systemParts.push(weatherHint);
+    systemParts.push("Pode usar ate 18 palavras so nesta resposta de clima.");
   }
 
   const messages: ChatMessage[] = [{ role: "system", content: systemParts.join(" ") }];
@@ -146,11 +169,18 @@ export function sanitizeReaction(raw: string): string | null {
     if (!candidate || BAD_LINE.test(candidate)) continue;
     const words = candidate.split(/\s+/).filter(Boolean);
     if (words.length < 1 || words.length > 18) continue;
+    // Bloqueia meta/inglês que vaza de modelos "reasoning"
     if (
-      /\b(the|analyze|mood|energy|personality|input|user|says)\b/i.test(candidate) &&
+      /\b(the|analyze|mood|energy|personality|input|user|says|asking|okay|check|conversation|history|temperature now|they)\b/i.test(
+        candidate
+      ) &&
       !/[áàãâéêíóôõúç]/i.test(candidate)
     ) {
       continue;
+    }
+    // Exige pelo menos algum sinal de PT-BR em respostas longas
+    if (words.length >= 4 && !/[áàãâéêíóôõúç]|(\b(não|nao|tá|ta|tô|to|pra|pro|você|voce|meu|minha|uns|tá|quente|frio)\b)/i.test(candidate)) {
+      if (/\b(now|they|asking|user|the|okay|let)\b/i.test(candidate)) continue;
     }
     return words.slice(0, 14).join(" ");
   }
@@ -158,15 +188,19 @@ export function sanitizeReaction(raw: string): string | null {
 }
 
 export function isBadReaction(text: string): boolean {
-  return !text || BAD_LINE.test(text) || !!text.match(/^User\s*says/i);
+  return (
+    !text ||
+    BAD_LINE.test(text) ||
+    !!text.match(/^User\s*says/i) ||
+    /\b(they'?re asking|the user is asking|okay,? the user)\b/i.test(text)
+  );
 }
 
 function extractText(data: OpenAICompatibleResponse): string {
   const msg = data.choices?.[0]?.message;
+  // Nunca usar reasoning como fala — gpt-oss/openrouter-auto vazam thinking em inglês
   const content = (msg?.content ?? "").trim();
   if (content) return content;
-  const reasoning = (msg?.reasoning ?? msg?.reasoning_content ?? "").trim();
-  if (reasoning) return reasoning;
   return (data.choices?.[0]?.text ?? "").trim();
 }
 
@@ -239,6 +273,70 @@ export async function generateReaction(
     }
   }
 
+  // Clima/temperatura: dados reais da região (IP → Open-Meteo)
+  if (msg && isWeatherQuestion(msg)) {
+    try {
+      const snap = await getWeatherSnapshot();
+      params = {
+        ...params,
+        weatherHint: weatherContextLine(snap),
+      };
+      // Resposta garantida com número real (LLM pode colorir depois; se falhar, usa esta)
+      const spoken = weatherSpokenLine(snap, params.companion.archetype ?? "curioso");
+      const citesWeather = (text: string) => {
+        const hasTemp = text.includes(String(snap.tempC));
+        const place = (snap.city || "").toLowerCase();
+        const hasPlace =
+          !place ||
+          place === "sua região" ||
+          text.toLowerCase().includes(place) ||
+          (!!snap.region && text.toLowerCase().includes(snap.region.toLowerCase()));
+        return hasTemp && hasPlace;
+      };
+      const messages = buildMessages(params);
+      const orHeaders = {
+        "HTTP-Referer": process.env.APP_URL ?? "http://localhost:3333",
+        "X-Title": "Companion Engine",
+      };
+      // Uma tentativa rápida de colorir; se falhar, fala local com °C real
+      const nvidiaKey = process.env.NVIDIA_API_KEY;
+      if (nvidiaKey) {
+        try {
+          const text = await callChatAPI(NVIDIA_API_URL, nvidiaKey, NVIDIA_TRY_MODELS[0], messages);
+          if (citesWeather(text)) {
+            if (msg) chatCache.set(cacheKey(companionId, msg), { text, at: Date.now() });
+            return text;
+          }
+        } catch (err) {
+          console.warn(`[llm] NVIDIA clima falhou:`, err);
+        }
+      } else {
+        const openrouterKey = process.env.OPENROUTER_API_KEY;
+        if (openrouterKey) {
+          try {
+            const text = await callChatAPI(
+              OPENROUTER_API_URL,
+              openrouterKey,
+              OPENROUTER_MODEL,
+              messages,
+              orHeaders
+            );
+            if (citesWeather(text)) {
+              if (msg) chatCache.set(cacheKey(companionId, msg), { text, at: Date.now() });
+              return text;
+            }
+          } catch (err) {
+            console.warn("[llm] OpenRouter falhou (clima):", err);
+          }
+        }
+      }
+      if (msg) chatCache.set(cacheKey(companionId, msg), { text: spoken, at: Date.now() });
+      return spoken;
+    } catch (err) {
+      console.warn("[llm] clima falhou:", err);
+    }
+  }
+
   const messages = buildMessages(params);
   const orHeaders = {
     "HTTP-Referer": process.env.APP_URL ?? "http://localhost:3333",
@@ -247,8 +345,7 @@ export async function generateReaction(
 
   const nvidiaKey = process.env.NVIDIA_API_KEY;
   if (nvidiaKey) {
-    const models = Array.from(new Set([NVIDIA_MODEL, ...NVIDIA_MODELS]));
-    for (const model of models) {
+    for (const model of NVIDIA_TRY_MODELS) {
       try {
         const text = await callChatAPI(NVIDIA_API_URL, nvidiaKey, model, messages);
         if (msg) chatCache.set(cacheKey(companionId, msg), { text, at: Date.now() });

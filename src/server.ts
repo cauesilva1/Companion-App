@@ -1,6 +1,12 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
+
+if (process.env.DOTENV_CONFIG_PATH) {
+  dotenv.config({ path: process.env.DOTENV_CONFIG_PATH });
+} else {
+  dotenv.config();
+}
 
 const app = express();
 app.use(cors());

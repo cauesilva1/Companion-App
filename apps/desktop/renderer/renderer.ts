@@ -341,6 +341,42 @@ let missShown = false;
 let currentActivity = "Presente";
 let lastSkyPeriod = "";
 let sfxAudio: HTMLAudioElement | null = null;
+const sfxPool = new Map<string, HTMLAudioElement>();
+
+function getSfx(name: string): HTMLAudioElement {
+  let a = sfxPool.get(name);
+  if (!a) {
+    a = new Audio(`assets/sfx/${name}.wav`);
+    a.preload = "auto";
+    sfxPool.set(name, a);
+  }
+  return a;
+}
+
+function playSfx(name: string) {
+  if (soundMuted) return;
+  try {
+    if (sfxAudio && sfxAudio !== getSfx(name)) {
+      sfxAudio.pause();
+      try {
+        sfxAudio.currentTime = 0;
+      } catch {
+        /* ignore */
+      }
+    }
+    sfxAudio = getSfx(name);
+    sfxAudio.pause();
+    try {
+      sfxAudio.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    sfxAudio.volume = 0.45;
+    void sfxAudio.play();
+  } catch {
+    /* ignore */
+  }
+}
 
 function dayWeatherStorm(): boolean {
   const d = new Date();
@@ -365,21 +401,6 @@ function applySky(tod?: string) {
   if (activeSkinId) document.body.dataset.skinTint = activeSkinId;
 }
 
-function playSfx(name: string) {
-  if (soundMuted) return;
-  try {
-    if (sfxAudio) {
-      sfxAudio.pause();
-      sfxAudio.currentTime = 0;
-    }
-    sfxAudio = new Audio(`assets/sfx/${name}.wav`);
-    sfxAudio.volume = 0.45;
-    void sfxAudio.play();
-  } catch {
-    /* ignore */
-  }
-}
-
 function playClipSfx(clip: string) {
   if (clip === "crack") playSfx("rocks");
   else if (clip === "hatch") playSfx("roar");
@@ -399,6 +420,7 @@ const PLAY_LINES: Record<string, string[]> = {
 
 let ambientTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingHatch = false;
+let hatchInProgress = false;
 
 function clearAmbientTimer() {
   if (ambientTimer) clearTimeout(ambientTimer);
@@ -576,16 +598,28 @@ function dinoIdleByMood(_mood: string) {
 
 async function dinoTick(ts: number) {
   if (!dinoPlayer.running) return;
+  if (document.hidden) {
+    dinoRaf = 0;
+    return;
+  }
+  // Idle: ~10 fps; clips de ação mantêm fps do sheet
+  if (dinoPlayer.clip === "idle") {
+    const minDt = 1000 / 10;
+    if (lastDinoTs && ts - lastDinoTs < minDt) {
+      dinoRaf = requestAnimationFrame(dinoTick);
+      return;
+    }
+  }
   const spec = DINO_CLIPS[dinoPlayer.clip] ?? DINO_CLIPS.idle;
   const src = `assets/dinos/${dinoPlayer.folder}/${spec.file}`;
   let img: HTMLImageElement;
   try {
     img = await loadSheet(src);
   } catch {
-    if (dinoPlayer.running) dinoRaf = requestAnimationFrame(dinoTick);
+    if (dinoPlayer.running && !document.hidden) dinoRaf = requestAnimationFrame(dinoTick);
     return;
   }
-  if (!dinoPlayer.running) return;
+  if (!dinoPlayer.running || document.hidden) return;
   const dt = lastDinoTs ? (ts - lastDinoTs) / 1000 : 0;
   lastDinoTs = ts;
   const fh = img.naturalHeight || 24;
@@ -606,17 +640,24 @@ async function dinoTick(ts: number) {
         dinoPlayer.frame = 0;
         playClipSfx(next);
         if (next === "idle" && companionIdForHatch) {
-          localStorage.setItem(hatchKey(), "1");
+          try {
+            localStorage.setItem(hatchKey(), "1");
+          } catch {
+            /* ignore */
+          }
+          hatchInProgress = false;
+          pendingHatch = false;
         }
         if (next === "idle") scheduleAmbientLife();
       } else {
         void dinoIdleByMood(lastMood);
+        hatchInProgress = false;
         scheduleAmbientLife();
       }
     }
   }
   drawDinoFrame(img, dinoPlayer.frame);
-  dinoRaf = requestAnimationFrame(dinoTick);
+  if (!document.hidden) dinoRaf = requestAnimationFrame(dinoTick);
 }
 
 async function startDinoLife(skin: SkinView, hatch: boolean) {
@@ -654,9 +695,8 @@ function hatchKey() {
 
 function shouldHatch(): boolean {
   if (document.body.classList.contains("quiz-open")) return false;
-  if (pendingHatch) return true;
-  if (!companionIdForHatch) return false;
-  return localStorage.getItem(hatchKey()) !== "1";
+  // Só nasce ovo logo após o quiz — nunca re-hatch em poll/restart
+  return pendingHatch || hatchInProgress;
 }
 
 function applySpriteMode(skin: SkinView | null | undefined) {
@@ -682,15 +722,24 @@ function applySpriteMode(skin: SkinView | null | undefined) {
       void showStaticEgg(folder);
       return;
     }
+    const hatchingNow =
+      hatchInProgress || ["eggMove", "crack", "hatch"].includes(dinoPlayer.clip);
+    if (dinoPlayer.running && dinoPlayer.folder === folder) {
+      if (hatchingNow) return; // não reinicia o nascimento
+      if (!shouldHatch()) {
+        scheduleAmbientLife();
+        return;
+      }
+    }
     const hatch = shouldHatch();
-    if (dinoPlayer.running && dinoPlayer.folder === folder && !hatch) {
-      scheduleAmbientLife();
-      return;
+    if (hatch) {
+      hatchInProgress = true;
+      pendingHatch = false;
     }
     void startDinoLife(skin, hatch);
-    if (hatch) pendingHatch = false;
   } else {
     stopDinoLife();
+    hatchInProgress = false;
   }
 }
 
@@ -837,11 +886,19 @@ function playActionSound(type: string) {
   }
 }
 
+let speechTimer: ReturnType<typeof setTimeout> | null = null;
+
 function showSpeech(text: string, durationMs = 4000) {
-  $<HTMLSpanElement>("speechText").textContent = text;
-  $<HTMLDivElement>("speechBubble").hidden = false;
-  setTimeout(() => {
-    $<HTMLDivElement>("speechBubble").hidden = true;
+  const bubble = $<HTMLDivElement>("speechBubble");
+  const label = $<HTMLSpanElement>("speechText");
+  label.textContent = text;
+  bubble.hidden = false;
+  bubble.classList.add("is-on");
+  if (speechTimer) clearTimeout(speechTimer);
+  speechTimer = setTimeout(() => {
+    bubble.hidden = true;
+    bubble.classList.remove("is-on");
+    speechTimer = null;
   }, durationMs);
 }
 
@@ -981,9 +1038,9 @@ function applySettingsToForm(settings: CompanionSettings) {
 
   const streak = settings.streakCount ?? 0;
   const done = settings.missions?.done ?? [];
-  const missionsExist = !!settings.missions && (done.length > 0 || !!settings.missions.day);
   const strip = document.getElementById("missionsStrip") as HTMLElement | null;
-  if (strip) strip.hidden = !(streak > 0 || missionsExist || done.length > 0);
+  // Missões ficam só no Config — home limpa
+  if (strip) strip.hidden = true;
 
   const streakEl = document.getElementById("missionsStreak");
   if (streakEl) streakEl.textContent = streak > 0 ? `${streak} dias` : "";
@@ -1011,19 +1068,25 @@ function applySettingsToForm(settings: CompanionSettings) {
   if (typeof settings.habitat === "boolean") applyHabitatUi(settings.habitat);
 }
 
-function closeSettingsPanel() {
-  const panel = document.getElementById("settingsPanel") as HTMLElement | null;
-  if (panel) panel.hidden = true;
-}
-
 function toggleSettingsPanel() {
   const panel = $<HTMLDivElement>("settingsPanel");
   const opening = panel.hidden;
   panel.hidden = !opening;
+  document.body.classList.toggle("settings-open", opening);
   if (opening) {
     const feed = document.getElementById("feedPanel") as HTMLElement | null;
     if (feed) feed.hidden = true;
+    void cw.companion.resize(true);
+  } else if (!expanded) {
+    void cw.companion.resize(false);
   }
+}
+
+function closeSettingsPanel() {
+  const panel = document.getElementById("settingsPanel") as HTMLElement | null;
+  if (panel) panel.hidden = true;
+  document.body.classList.remove("settings-open");
+  if (!expanded) void cw.companion.resize(false);
 }
 
 function bindSettingsPanel() {
@@ -1350,6 +1413,19 @@ async function init(options: { silent?: boolean } = {}) {
 document.addEventListener("DOMContentLoaded", () => {
   applySky();
   showQuiz();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (dinoRaf) {
+        cancelAnimationFrame(dinoRaf);
+        dinoRaf = 0;
+      }
+      return;
+    }
+    if (dinoPlayer.running && !dinoRaf) {
+      lastDinoTs = 0;
+      dinoRaf = requestAnimationFrame(dinoTick);
+    }
+  });
   void waitForApi()
     .then(() => {
       cw.companion.onSkinChanged((payload) => {

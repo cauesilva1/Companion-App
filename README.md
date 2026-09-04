@@ -52,7 +52,9 @@ Amanhecer · dia · entardecer · noite · tempestade
 - **Céu dinâmico** — muda com a hora (+ clima do dia)
 - **Spotify / Apple Music** — detecta a faixa (se o app já estiver aberto) e comenta
 - **Tray + minimizar** — some pro tray e manda notificações personalizadas
-- **Chat com LLM** — NVIDIA NIM (cascata) → OpenRouter → voz local
+- **Chat com LLM** — DeepSeek / NVIDIA → OpenRouter → voz local
+- **Clima real** — temperatura da sua região (não inventa graus)
+- **Build DMG** — app standalone com API embutida
 
 Design: widget arredondado, dino à esquerda no céu, painel de ações à direita.
 
@@ -67,6 +69,7 @@ companion-backend/
 ├── apps/desktop/        # popup Electron
 │   ├── electron/        # main / preload / Spotify
 │   └── renderer/        # UI, sprites, sons, céus
+├── scripts/             # prepare bundle + make-dmg
 ├── docs/preview/        # imagens do README
 └── data/                # sessão local (gitignored)
 ```
@@ -118,16 +121,57 @@ npm run dev:api
 
 ---
 
+## Build (app standalone no Mac)
+
+Gera um `.app` / `.dmg` que **sobe a API sozinho** — no dia a dia você não precisa de `npm run dev`.
+
+**Requisitos:** Node.js 20+, macOS, `.env` na raiz com as chaves da LLM (o script de prepare copia esse `.env` para o bundle, **sem** `DATABASE_URL`, modo mock).
+
+```bash
+npm install
+cp .env.example .env   # se ainda não tiver; preencha as chaves
+npm run dist:mac
+```
+
+Isso:
+
+1. Compila a API e monta `apps/desktop/resources/api`
+2. Gera o ícone (dino Mort) e empacota o Electron
+3. Cria o DMG com `hdiutil`
+
+**Saída:**
+
+| Arquivo | Caminho |
+| --- | --- |
+| App | `apps/desktop/release/mac/Companion.app` |
+| DMG | `apps/desktop/release/Companion-1.0.0-mac.dmg` |
+
+**Usar o app:**
+
+1. Abra o DMG (ou o `.app` direto)
+2. Arraste **Companion** para Aplicativos (opcional)
+3. Na primeira abertura: clique com o botão direito → **Abrir** (app sem assinatura Apple)
+4. Dados locais ficam em `~/Library/Application Support/Companion/`
+
+Só a pasta do app (sem DMG):
+
+```bash
+npm run prepare:desktop
+npm run build --workspace=companion-desktop
+npm run pack --workspace=companion-desktop
+```
+
+---
+
 ## Modelos NVIDIA (cascata)
 
-Ordem padrão (configurável em `NVIDIA_MODELS`):
+Ordem padrão (configurável em `NVIDIA_MODELS` / `NVIDIA_MODEL`):
 
-1. `openai/gpt-oss-20b`
-2. `moonshotai/kimi-k3`
-3. `nvidia/nemotron-3-super-120b-a12b`
-4. `deepseek-ai/deepseek-v4-pro-0813`
+1. `deepseek-ai/deepseek-v4-pro-0813` (primário)
+2. um fallback da lista / OpenRouter
+3. fala local se tudo falhar
 
-Se um falhar, tenta o próximo; depois OpenRouter; por fim fala local.
+Perguntas de clima usam localização (IP) + Open-Meteo e citam temperatura real da região.
 
 ---
 
@@ -166,6 +210,7 @@ Ver [apps/desktop/ATTRIBUTION.md](apps/desktop/ATTRIBUTION.md):
 - `.env` está no `.gitignore` — **não** suba chaves reais
 - Use só placeholders em `.env.example`
 - Sessão local e `data/` também ficam fora do git
+- `apps/desktop/resources/` e `apps/desktop/release/` (bundle/DMG) também ficam fora do git
 
 Se uma chave vazou em algum momento, **revogue e gere outra** no provedor.
 

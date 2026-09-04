@@ -12,6 +12,8 @@
     "dev:desktop": "wait-on http://127.0.0.1:3333/health && npm run dev --workspace=companion-desktop",
     "build": "tsc -p tsconfig.json && npm run build --workspace=companion-desktop",
     "start": "node dist/server.js",
+    "dist:mac": "npm run dist:mac --workspace=companion-desktop",
+    "prepare:desktop": "node scripts/prepare-desktop-bundle.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
@@ -27,6 +29,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.9.0",
+    "7zip-bin": "^5.2.0",
     "concurrently": "^9.1.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",

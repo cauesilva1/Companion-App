@@ -16,12 +16,33 @@ import * as fs from "fs";
 import * as https from "https";
 import * as http from "http";
 import * as url from "url";
+import { spawn, ChildProcess } from "child_process";
 import { findSkin, isValidSkinId, listSkins, normalizeSkinId, SkinView } from "./skinCatalog";
 import { getNowPlaying, mediaCommand } from "./mediaMac";
 import { getFrontScreenContext, isSensitiveApp } from "./screenContext";
 
-require("dotenv").config({ path: path.join(__dirname, "../../../../.env") });
-require("dotenv").config({ path: path.join(__dirname, "../../.env") });
+const isPackaged = app.isPackaged;
+if (isPackaged) {
+  // Pasta estável no Application Support (não o name do package.json)
+  app.setPath("userData", path.join(app.getPath("appData"), "Companion"));
+}
+
+function resolveEnvFiles(): string[] {
+  if (isPackaged) {
+    return [
+      path.join(app.getPath("userData"), ".env"),
+      path.join(process.resourcesPath, ".env"),
+    ];
+  }
+  return [
+    path.join(__dirname, "../../../../.env"),
+    path.join(__dirname, "../../.env"),
+  ];
+}
+
+for (const envFile of resolveEnvFiles()) {
+  if (fs.existsSync(envFile)) require("dotenv").config({ path: envFile });
+}
 
 const API_URL = (process.env.API_URL ?? "http://127.0.0.1:3333").replace(
   "://localhost",
@@ -29,7 +50,9 @@ const API_URL = (process.env.API_URL ?? "http://127.0.0.1:3333").replace(
 );
 console.log("[desktop] API_URL =", API_URL);
 
-const SESSION_PATH = path.join(__dirname, "../../data/session.json");
+const SESSION_PATH = isPackaged
+  ? path.join(app.getPath("userData"), "session.json")
+  : path.join(__dirname, "../../data/session.json");
 type PrankKind = "shake" | "bounce" | "notify" | "tease-sound" | "hide-and-seek";
 
 interface SessionData {
@@ -106,9 +129,19 @@ let isQuitting = false;
 let cachedAffection = 50;
 let cachedEnergy = 80;
 const IDLE_THRESHOLD_MIN = 3;
+const PRESENCE_INTERVAL_MS = 45_000;
+const SCREEN_INTERVAL_MS = 45_000;
+const companionImageCache = new Map<string, Electron.NativeImage>();
+let apiChild: ChildProcess | null = null;
+let presencePaused = false;
+let ownedApiProcess = false;
 
 /** Ícone do companion (dino recortado) — tray, toast e notificação nativa. */
 function buildCompanionImage(size: number): Electron.NativeImage {
+  const cacheKey = `${currentSkinId}:${size}`;
+  const hit = companionImageCache.get(cacheKey);
+  if (hit && !hit.isEmpty()) return hit;
+
   const candidates = [
     path.join(__dirname, `../../renderer/assets/skins/${currentSkinId}/idle.png`),
     path.join(__dirname, "../../renderer/assets/skins/dino-doux/idle.png"),
@@ -151,13 +184,17 @@ function buildCompanionImage(size: number): Electron.NativeImage {
     } catch {
       /* mantém original */
     }
-    return img.resize({ width: size, height: size, quality: "best" });
+    const resized = img.resize({ width: size, height: size, quality: "best" });
+    companionImageCache.set(cacheKey, resized);
+    return resized;
   }
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
     "base64"
   );
-  return nativeImage.createFromBuffer(png).resize({ width: size, height: size });
+  const fallback = nativeImage.createFromBuffer(png).resize({ width: size, height: size });
+  companionImageCache.set(cacheKey, fallback);
+  return fallback;
 }
 
 function buildTrayImage(): Electron.NativeImage {
@@ -179,6 +216,7 @@ function showMainWindow() {
   if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide();
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
+    resumeBackgroundTimers();
     return;
   }
   windowMinimized = false;
@@ -191,6 +229,41 @@ function showMainWindow() {
   mainWindow.focus();
   if (process.platform === "darwin") {
     app.focus({ steal: true });
+  }
+  resumeBackgroundTimers();
+}
+
+function pauseBackgroundTimers() {
+  presencePaused = true;
+  if (presenceTimer) {
+    clearInterval(presenceTimer);
+    presenceTimer = null;
+  }
+  if (screenTimer) {
+    clearInterval(screenTimer);
+    screenTimer = null;
+  }
+}
+
+function resumeBackgroundTimers() {
+  if (!presencePaused && presenceTimer && screenTimer) return;
+  presencePaused = false;
+  if (!presenceTimer) {
+    presenceTimer = setInterval(() => {
+      void (async () => {
+        await refreshBattery();
+        await refreshNowPlaying();
+        const idleMinutes = Math.floor((Date.now() - lastUserTouchAt) / 60_000);
+        if (idleMinutes >= IDLE_THRESHOLD_MIN) wasIdle = true;
+        emitPresence();
+        maybeMinimizedNudge();
+      })();
+    }, PRESENCE_INTERVAL_MS);
+  }
+  if (!screenTimer) {
+    screenTimer = setInterval(() => {
+      if (perceiveApp) void refreshScreenContext();
+    }, SCREEN_INTERVAL_MS);
   }
 }
 
@@ -316,7 +389,7 @@ function windowSize(): { w: number; h: number } {
   if (quizMode) return { w: 520, h: 480 };
   if (habitatMode) return { w: 440, h: 380 };
   if (compact) return { w: 160, h: 160 };
-  return { w: 440, h: 236 };
+  return { w: 440, h: 250 };
 }
 
 function todayKey() {
@@ -807,6 +880,7 @@ function minimizeToTray() {
   windowMinimized = true;
   mainWindow.hide();
   updateTrayIcon();
+  pauseBackgroundTimers();
   // No macOS, banner nativo some se o app ainda estiver em foco —
   // esconde o app e atrasa um pouco a notificação.
   if (process.platform === "darwin") {
@@ -1266,6 +1340,7 @@ ipcMain.handle("companion:createCompanion", async (_e, body: object) => {
     if (data.name) companionName = data.name;
     if (data.skin && isValidSkinId(data.skin)) {
       currentSkinId = normalizeSkinId(data.skin);
+      companionImageCache.clear();
       applySkinToWindow();
     }
     quizMode = false;
@@ -1374,6 +1449,7 @@ ipcMain.handle("companion:setSkin", (_e, skinId: string) => {
   if (!skin) return findSkin(currentSkinId);
   if (skin.render === "sprite" && !skin.available) return findSkin(currentSkinId);
   currentSkinId = skin.id;
+  companionImageCache.clear();
   saveSession();
   applySkinToWindow();
   rebuildTray();
@@ -1403,8 +1479,8 @@ ipcMain.handle("companion:media", async (_e, cmd: "prev" | "toggle" | "next") =>
 ipcMain.handle("companion:resize", (_e, expanded: boolean) => {
   if (quizMode || compact || habitatMode) return;
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  const w = expanded ? 520 : 440;
-  const h = expanded ? 286 : 236;
+  const w = expanded ? 500 : 440;
+  const h = expanded ? 380 : 250;
   const x = typeof savedX === "number" ? savedX : sw - w - 16;
   const y = typeof savedY === "number" ? savedY : sh - h - 16;
   const pos = clampToWorkArea(x, y, w, h);
@@ -1431,7 +1507,135 @@ ipcMain.handle("companion:runPrank", async (_e, kind: PrankKind) => {
   return { ok: true };
 });
 
+function waitForApiHealth(timeoutMs = 20000): Promise<void> {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      const req = http.get(`${API_URL}/health`, (res) => {
+        res.resume();
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve();
+          return;
+        }
+        if (Date.now() - started > timeoutMs) {
+          reject(new Error("API health timeout"));
+          return;
+        }
+        setTimeout(tick, 250);
+      });
+      req.on("error", () => {
+        if (Date.now() - started > timeoutMs) {
+          reject(new Error("API health timeout"));
+          return;
+        }
+        setTimeout(tick, 250);
+      });
+    };
+    tick();
+  });
+}
+
+async function ensureEmbeddedApi(): Promise<void> {
+  if (!isPackaged) return;
+  try {
+    await waitForApiHealth(800);
+    console.log("[desktop] API já estava no ar");
+    return;
+  } catch {
+    /* sobe a embutida */
+  }
+
+  const apiEntry = path.join(process.resourcesPath, "api", "server.js");
+  if (!fs.existsSync(apiEntry)) {
+    throw new Error(`API embutida não encontrada: ${apiEntry}`);
+  }
+
+  const userData = app.getPath("userData");
+  const dataDir = path.join(userData, "data");
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  // Seed empacotado (companions do build) ou legado do repo em dev
+  const destStore = path.join(dataDir, "companions.json");
+  if (!fs.existsSync(destStore)) {
+    const candidates = [
+      path.join(process.resourcesPath, "api", "seed-companions.json"),
+      path.join(__dirname, "../../../../data/companions.json"),
+    ];
+    for (const legacy of candidates) {
+      if (!fs.existsSync(legacy)) continue;
+      try {
+        fs.copyFileSync(legacy, destStore);
+        console.log("[desktop] dados iniciais copiados de", legacy);
+        break;
+      } catch {
+        /* try next */
+      }
+    }
+  }
+
+  const userEnv = path.join(userData, ".env");
+  const resourceEnv = path.join(process.resourcesPath, ".env");
+  if (!fs.existsSync(userEnv) && fs.existsSync(resourceEnv)) {
+    try {
+      fs.copyFileSync(resourceEnv, userEnv);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ELECTRON_RUN_AS_NODE: "1",
+    PORT: process.env.PORT || "3333",
+    COMPANION_DATA_DIR: dataDir,
+    APP_URL: API_URL,
+  };
+  delete env.DATABASE_URL;
+  if (fs.existsSync(userEnv)) {
+    env.DOTENV_CONFIG_PATH = userEnv;
+  } else if (fs.existsSync(resourceEnv)) {
+    env.DOTENV_CONFIG_PATH = resourceEnv;
+  }
+
+  console.log("[desktop] subindo API embutida…", apiEntry);
+  apiChild = spawn(process.execPath, [apiEntry], {
+    env,
+    cwd: path.dirname(apiEntry),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  ownedApiProcess = true;
+  apiChild.stdout?.on("data", (buf) => console.log(`[api] ${String(buf).trim()}`));
+  apiChild.stderr?.on("data", (buf) => console.warn(`[api] ${String(buf).trim()}`));
+  apiChild.on("exit", (code) => {
+    console.warn("[desktop] API embutida encerrou com código", code);
+    apiChild = null;
+  });
+
+  await waitForApiHealth(25000);
+  console.log("[desktop] API embutida pronta");
+}
+
+function stopEmbeddedApi() {
+  if (!ownedApiProcess || !apiChild) return;
+  try {
+    apiChild.kill("SIGTERM");
+  } catch {
+    /* ignore */
+  }
+  apiChild = null;
+  ownedApiProcess = false;
+}
+
 app.whenReady().then(async () => {
+  try {
+    await ensureEmbeddedApi();
+  } catch (err) {
+    console.error("[desktop] falha ao subir API embutida:", err);
+    dialog.showErrorBox(
+      "Companion",
+      "Não consegui iniciar o motor local. Feche outras instâncias na porta 3333 e tente de novo."
+    );
+  }
   loadSession();
   ensureDailyProgress();
   await refreshBattery();
@@ -1440,21 +1644,9 @@ app.whenReady().then(async () => {
   createTray();
   globalShortcut.register("CommandOrControl+Shift+C", () => toggleVisibility());
   prankTimer = setInterval(() => maybeRandomPrank(), 5 * 60_000);
-  presenceTimer = setInterval(() => {
-    void (async () => {
-      await refreshBattery();
-      await refreshNowPlaying();
-      const idleMinutes = Math.floor((Date.now() - lastUserTouchAt) / 60_000);
-      if (idleMinutes >= IDLE_THRESHOLD_MIN) wasIdle = true;
-      emitPresence();
-      maybeMinimizedNudge();
-    })();
-  }, 10_000);
+  resumeBackgroundTimers();
   minimizedNotifyTimer = setInterval(() => maybeMinimizedNudge(), 5 * 60_000);
   void refreshScreenContext();
-  screenTimer = setInterval(() => {
-    if (perceiveApp) void refreshScreenContext();
-  }, 15_000);
   nativeTheme.on("updated", () => emitPresence());
   app.on("activate", () => {
     // Dock click: janela escondida ainda existe — precisa show, não create
@@ -1464,10 +1656,12 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  stopEmbeddedApi();
 });
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  stopEmbeddedApi();
   if (prankTimer) clearInterval(prankTimer);
   if (presenceTimer) clearInterval(presenceTimer);
   if (minimizedNotifyTimer) clearInterval(minimizedNotifyTimer);
