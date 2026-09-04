@@ -11,10 +11,13 @@ enum LiveActivityController {
       throw LiveActivityError.disabled
     }
 
-    // Encerra atividades anteriores para não empilhar
-    let existing = Activity<CompanionAttributes>.activities
-    for old in existing {
-      Task { await old.end(using: nil, dismissalPolicy: .immediate) }
+    // Se a cena ainda está rolando, não reinicia
+    if let current = Activity<CompanionAttributes>.activities.first {
+      let elapsed = Date().timeIntervalSince(current.attributes.startedAt)
+      if elapsed < IslandTiming.total {
+        return current.id
+      }
+      Task { await current.end(using: nil, dismissalPolicy: .immediate) }
     }
 
     let startedAt = Date()
@@ -33,7 +36,6 @@ enum LiveActivityController {
       pushType: nil
     )
 
-    // Se o app ainda estiver vivo, encerra limpo após a cena
     let activityId = activity.id
     Task {
       let ns = UInt64((IslandTiming.total + 0.35) * 1_000_000_000)

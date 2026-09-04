@@ -75,19 +75,15 @@ final class CompanionViewModel: ObservableObject {
     }
   }
 
-  func startIsland() {
+  /// Dispara a Island ao sair do app (background). One-shot: corre → dano → some.
+  func startIslandOnLeave() {
     do {
       _ = try LiveActivityController.start(snapshot: snapshot, line: reaction)
-      reaction = "Dino na Island — corre, toma dano e some (mesmo com o app fechado)."
     } catch {
-      reaction = error.localizedDescription
+      print("[island] \(error.localizedDescription)")
     }
   }
 
-  func endIsland() async {
-    await LiveActivityController.endAll()
-    reaction = "Live Activity encerrada."
-  }
 
   private func resolveId() async throws -> String {
     saveCompanionId()
@@ -107,6 +103,7 @@ final class CompanionViewModel: ObservableObject {
 
 struct ContentView: View {
   @StateObject private var model = CompanionViewModel()
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     NavigationStack {
@@ -116,7 +113,7 @@ struct ContentView: View {
           reactionCard
           actions
           chatRow
-          islandRow
+          islandHint
           settings
         }
         .padding()
@@ -141,6 +138,11 @@ struct ContentView: View {
         }
       }
       .task { await model.bootstrap() }
+      .onChange(of: scenePhase) { phase in
+        if phase == .background {
+          model.startIslandOnLeave()
+        }
+      }
     }
   }
 
@@ -219,15 +221,13 @@ struct ContentView: View {
     }
   }
 
-  private var islandRow: some View {
-    HStack {
-      Button("Dynamic Island") { model.startIsland() }
-        .buttonStyle(.bordered)
-      Button("Encerrar ilha") {
-        Task { await model.endIsland() }
-      }
-      .buttonStyle(.bordered)
-    }
+  private var islandHint: some View {
+    Text("Ao sair do app, o dino aparece na Dynamic Island: corre, toma dano na borda e some.")
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding()
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
   }
 
   private var settings: some View {
