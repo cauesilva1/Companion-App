@@ -78,7 +78,7 @@ final class CompanionViewModel: ObservableObject {
   func startIsland() {
     do {
       _ = try LiveActivityController.start(snapshot: snapshot, line: reaction)
-      reaction = "Live Activity / Dynamic Island ligada."
+      reaction = "Dino na Island — corre, toma dano e some (mesmo com o app fechado)."
     } catch {
       reaction = error.localizedDescription
     }

@@ -5,52 +5,55 @@ import SwiftUI
 struct CompanionLiveActivityWidget: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: CompanionAttributes.self) { context in
-      // Lock screen / banner
-      HStack(spacing: 12) {
-        DinoAvatar(skin: context.state.skin, size: 48)
-        VStack(alignment: .leading, spacing: 4) {
-          Text(context.state.name).font(.headline)
-          Text(context.state.line)
-            .font(.caption)
-            .lineLimit(2)
-          HStack {
-            Label("\(context.state.energy)%", systemImage: "bolt.fill")
-            Label("\(context.state.affection)%", systemImage: "heart.fill")
-          }
-          .font(.caption2)
-        }
-        Spacer(minLength: 0)
-      }
-      .padding()
-      .activityBackgroundTint(Color.cyan.opacity(0.25))
+      // Banner / lock — só o dino correndo → dano → some
+      IslandRunThenHurtView(
+        skin: context.attributes.skin,
+        startedAt: context.attributes.startedAt,
+        size: 48
+      )
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 10)
+      .padding(.horizontal, 14)
+      .activityBackgroundTint(Color.cyan.opacity(0.2))
       .activitySystemActionForegroundColor(.primary)
     } dynamicIsland: { context in
       DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          DinoAvatar(skin: context.state.skin, size: 40)
+          EmptyView()
         }
         DynamicIslandExpandedRegion(.trailing) {
-          VStack(alignment: .trailing) {
-            Text("⚡\(context.state.energy)%").font(.caption.monospacedDigit())
-            Text("❤️\(context.state.affection)%").font(.caption.monospacedDigit())
-          }
+          EmptyView()
         }
         DynamicIslandExpandedRegion(.center) {
-          Text(context.state.name).font(.headline)
+          EmptyView()
         }
         DynamicIslandExpandedRegion(.bottom) {
-          Text(context.state.line)
-            .font(.caption)
-            .lineLimit(2)
+          IslandRunThenHurtView(
+            skin: context.attributes.skin,
+            startedAt: context.attributes.startedAt,
+            size: 40
+          )
+          .frame(maxWidth: .infinity)
+          .padding(.horizontal, 4)
         }
       } compactLeading: {
-        DinoAvatar(skin: context.state.skin, size: 22)
+        IslandRunThenHurtView(
+          skin: context.attributes.skin,
+          startedAt: context.attributes.startedAt,
+          size: 18
+        )
+        .frame(width: 52, height: 22)
       } compactTrailing: {
-        Text("\(context.state.energy)%")
-          .font(.caption2.monospacedDigit())
+        // Sem bateria / energia — espaço vazio
+        EmptyView()
       } minimal: {
-        DinoAvatar(skin: context.state.skin, size: 18)
+        DinoAvatar(skin: context.attributes.skin, size: 16)
+          .opacity(islandStillVisible(startedAt: context.attributes.startedAt) ? 1 : 0)
       }
     }
+  }
+
+  private func islandStillVisible(startedAt: Date) -> Bool {
+    Date().timeIntervalSince(startedAt) < IslandTiming.total
   }
 }
