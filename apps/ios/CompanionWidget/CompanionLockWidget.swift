@@ -29,23 +29,22 @@ struct CompanionLockView: View {
     case .accessoryCircular:
       ZStack {
         AccessoryWidgetBackground()
-        VStack(spacing: 2) {
-          Text(entry.snapshot.moodEmoji).font(.title3)
-          Text("\(entry.snapshot.energyPercent)")
-            .font(.caption2.monospacedDigit())
-        }
+        DinoAvatar(skin: entry.snapshot.skin, size: 28)
       }
     case .accessoryInline:
-      Text("\(entry.snapshot.moodEmoji) \(entry.snapshot.name) · \(entry.snapshot.energyPercent)%")
+      Text("\(entry.snapshot.name) · \(entry.snapshot.energyPercent)%")
     default:
-      VStack(alignment: .leading, spacing: 2) {
-        Text("\(entry.snapshot.moodEmoji) \(entry.snapshot.name)")
-          .font(.headline)
-        Text(entry.snapshot.moodText)
-          .font(.caption2)
-          .lineLimit(2)
-        Text("⚡\(entry.snapshot.energyPercent) ❤️\(entry.snapshot.affectionPercent)")
-          .font(.caption2)
+      HStack(spacing: 8) {
+        DinoAvatar(skin: entry.snapshot.skin, size: 36)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(entry.snapshot.name)
+            .font(.headline)
+          Text(entry.snapshot.moodText)
+            .font(.caption2)
+            .lineLimit(2)
+          Text("⚡\(entry.snapshot.energyPercent) ❤️\(entry.snapshot.affectionPercent)")
+            .font(.caption2)
+        }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }

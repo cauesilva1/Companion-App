@@ -39,24 +39,28 @@ struct CompanionHomeWidget: Widget {
 }
 
 struct CompanionHomeView: View {
+  @Environment(\.widgetFamily) private var family
   let entry: CompanionEntry
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Text(entry.snapshot.moodEmoji).font(.largeTitle)
-        VStack(alignment: .leading) {
-          Text(entry.snapshot.name).font(.headline)
-          Text(entry.snapshot.mood).font(.caption).foregroundStyle(.secondary)
+    HStack(spacing: 10) {
+      DinoAvatar(skin: entry.snapshot.skin, size: family == .systemSmall ? 44 : 64)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(entry.snapshot.name).font(.headline)
+        Text("\(entry.snapshot.moodEmoji) \(entry.snapshot.moodText)")
+          .font(.caption)
+          .lineLimit(2)
+        if family != .systemSmall {
+          Label("Energia \(entry.snapshot.energyPercent)%", systemImage: "bolt.fill")
+            .font(.caption2)
+          Label("Afeto \(entry.snapshot.affectionPercent)%", systemImage: "heart.fill")
+            .font(.caption2)
+        } else {
+          Text("⚡\(entry.snapshot.energyPercent)%")
+            .font(.caption2.monospacedDigit())
         }
       }
-      Text(entry.snapshot.moodText)
-        .font(.caption)
-        .lineLimit(2)
-      Label("Energia \(entry.snapshot.energyPercent)%", systemImage: "bolt.fill")
-        .font(.caption2)
-      Label("Afeto \(entry.snapshot.affectionPercent)%", systemImage: "heart.fill")
-        .font(.caption2)
+      Spacer(minLength: 0)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
   }

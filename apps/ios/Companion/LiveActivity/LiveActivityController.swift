@@ -8,7 +8,7 @@ enum LiveActivityController {
     guard ActivityAuthorizationInfo().areActivitiesEnabled else {
       throw LiveActivityError.disabled
     }
-    let attributes = CompanionAttributes(companionId: snapshot.id, skin: snapshot.skin)
+    let attributes = CompanionAttributes(companionId: snapshot.id)
     let state = CompanionAttributes.ContentState.from(snapshot: snapshot, line: line)
     let activity = try Activity.request(
       attributes: attributes,

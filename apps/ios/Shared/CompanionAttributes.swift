@@ -10,10 +10,10 @@ struct CompanionAttributes: ActivityAttributes {
     var energy: Int
     var affection: Int
     var line: String
+    var skin: String
   }
 
   var companionId: String
-  var skin: String
 }
 
 extension CompanionAttributes.ContentState {
@@ -24,7 +24,8 @@ extension CompanionAttributes.ContentState {
       moodText: snapshot.moodText,
       energy: snapshot.energyPercent,
       affection: snapshot.affectionPercent,
-      line: line ?? snapshot.moodText
+      line: line ?? snapshot.moodText,
+      skin: snapshot.skin
     )
   }
 
@@ -34,6 +35,7 @@ extension CompanionAttributes.ContentState {
     moodText: "zezinho está feliz",
     energy: 72,
     affection: 80,
-    line: "Tô na ilha. Me cutuca depois."
+    line: "Tô na ilha. Me cutuca depois.",
+    skin: "dino-mort"
   )
 }

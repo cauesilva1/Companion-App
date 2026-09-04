@@ -7,8 +7,7 @@ struct CompanionLiveActivityWidget: Widget {
     ActivityConfiguration(for: CompanionAttributes.self) { context in
       // Lock screen / banner
       HStack(spacing: 12) {
-        Text(moodEmoji(context.state.mood))
-          .font(.largeTitle)
+        DinoAvatar(skin: context.state.skin, size: 48)
         VStack(alignment: .leading, spacing: 4) {
           Text(context.state.name).font(.headline)
           Text(context.state.line)
@@ -28,7 +27,7 @@ struct CompanionLiveActivityWidget: Widget {
     } dynamicIsland: { context in
       DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          Text(moodEmoji(context.state.mood)).font(.title)
+          DinoAvatar(skin: context.state.skin, size: 40)
         }
         DynamicIslandExpandedRegion(.trailing) {
           VStack(alignment: .trailing) {
@@ -45,26 +44,13 @@ struct CompanionLiveActivityWidget: Widget {
             .lineLimit(2)
         }
       } compactLeading: {
-        Text(moodEmoji(context.state.mood))
+        DinoAvatar(skin: context.state.skin, size: 22)
       } compactTrailing: {
         Text("\(context.state.energy)%")
           .font(.caption2.monospacedDigit())
       } minimal: {
-        Text(moodEmoji(context.state.mood))
+        DinoAvatar(skin: context.state.skin, size: 18)
       }
-    }
-  }
-
-  private func moodEmoji(_ mood: String) -> String {
-    switch mood.uppercased() {
-    case "EXCITED": return "✨"
-    case "HAPPY": return "😊"
-    case "CONTENT": return "😌"
-    case "BORED": return "😐"
-    case "SLEEPY": return "😴"
-    case "SAD": return "😢"
-    case "LONELY": return "🥺"
-    default: return "🦕"
     }
   }
 }

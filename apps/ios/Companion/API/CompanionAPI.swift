@@ -3,19 +3,15 @@ import Foundation
 enum APIConfig {
   /// Simulador → Mac localhost. Device físico: use o IP do Mac na mesma Wi‑Fi.
   static var baseURL: URL {
-    if let stored = CompanionAppGroup.defaults.string(forKey: CompanionAppGroup.apiBaseKey),
+    if let stored = CompanionSnapshotStore.savedApiBase(),
        let url = URL(string: stored), !stored.isEmpty {
       return url
     }
-    #if targetEnvironment(simulator)
     return URL(string: "http://127.0.0.1:3333")!
-    #else
-    return URL(string: "http://127.0.0.1:3333")!
-    #endif
   }
 
   static func setBaseURL(_ string: String) {
-    CompanionAppGroup.defaults.set(string, forKey: CompanionAppGroup.apiBaseKey)
+    CompanionSnapshotStore.saveApiBase(string)
   }
 }
 
@@ -63,9 +59,9 @@ actor CompanionAPI {
     return (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool == true
   }
 
-  /// Lista companions do modo mock (`GET /companion` se existir) ou usa id salvo.
+  /// Lista companions do modo mock (`GET /companion/export`) ou usa id salvo.
   func resolveCompanionId() async throws -> String {
-    if let saved = CompanionAppGroup.defaults.string(forKey: CompanionAppGroup.companionIdKey),
+    if let saved = CompanionSnapshotStore.savedCompanionId(),
        !saved.isEmpty, saved != "demo" {
       return saved
     }
@@ -78,7 +74,7 @@ actor CompanionAPI {
        let list = json["companions"] as? [[String: Any]],
        let first = list.first,
        let id = first["id"] as? String {
-      CompanionAppGroup.defaults.set(id, forKey: CompanionAppGroup.companionIdKey)
+      CompanionSnapshotStore.saveCompanionId(id)
       return id
     }
     throw CompanionAPIError.empty
