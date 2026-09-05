@@ -12,9 +12,20 @@ App SwiftUI + WidgetKit + Live Activity. Sync **direto com Supabase** (sem Expre
 
 Standalone (sem login) continua funcionando no aparelho.
 
-### Música
+### Música (Spotify)
 
-Só **leitura** do Now Playing (título/artista). Sem play/pause/skip. Toggle em Config.
+No iPhone **não** dá para ler Spotify/YouTube/Safari pelo Now Playing do sistema. O app usa a **Spotify Web API** (OAuth PKCE).
+
+**Um Client ID do produto** (seu), embutido no build — cada usuário só faz login com a conta Spotify dele:
+
+1. Crie um app em [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+2. Redirect URI: `companion://spotify-callback`
+3. No `.env`: `SPOTIFY_CLIENT_ID=...` → `node scripts/sync-supabase-config.mjs` → rebuild
+4. No app: **Config → Conectar Spotify** (sem digitar Client ID)
+
+**Quota Spotify:** em Development Mode só ~25 emails listados no dashboard funcionam. Para qualquer usuário Spotify, peça Extended Quota / revisão no dashboard.
+
+YouTube e Safari: sem API pública equivalente — não suportados.
 
 ### O que NÃO é embutido
 

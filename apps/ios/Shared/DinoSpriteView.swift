@@ -160,6 +160,12 @@ struct DinoSpriteView: View {
         .scaledToFit()
         .frame(width: size, height: size)
         .accessibilityLabel("Dino \(skin)")
+    } else if isEggSequence(playing) {
+      // Sem fallback para idle — evita “pular” o hatch.
+      let count = max(4, Int(playing.fps))
+      let index = frameIndex(at: date, count: count)
+      eggPlaceholder(frame: index, total: count)
+        .frame(width: size, height: size)
     } else if let idle = DinoSpriteCatalog.sheetImage(skin: skin, clip: .idle) {
       let idleKey = DinoSpriteCatalog.sheetName(skin: skin, clip: .idle)
       Image(uiImage: DinoSpriteCatalog.frameImage(sheetKey: idleKey, sheet: idle, index: 0))
@@ -173,6 +179,28 @@ struct DinoSpriteView: View {
     #else
     DinoAvatar(skin: skin, size: size)
     #endif
+  }
+
+  private func isEggSequence(_ clip: DinoClip) -> Bool {
+    clip == .eggMove || clip == .crack || clip == .hatch
+  }
+
+  @ViewBuilder
+  private func eggPlaceholder(frame: Int, total: Int) -> some View {
+    let t = Double(frame) / Double(max(1, total - 1))
+    ZStack {
+      RoundedRectangle(cornerRadius: size * 0.35, style: .continuous)
+        .fill(Color.white.opacity(0.92))
+        .overlay(
+          RoundedRectangle(cornerRadius: size * 0.35, style: .continuous)
+            .stroke(Color.black.opacity(0.15), lineWidth: 2)
+        )
+        .scaleEffect(0.72 + 0.06 * sin(t * .pi))
+      if playing == .crack || playing == .hatch {
+        Text(playing == .hatch ? "✨" : "💥")
+          .font(.system(size: size * 0.28))
+      }
+    }
   }
 
   private func frameIndex(at date: Date, count: Int) -> Int {

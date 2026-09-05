@@ -61,6 +61,7 @@
 		B2C3D4E5F60718293A4B13 /* CompanionQuiz.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F60718293A4B11 /* CompanionQuiz.swift */; };
 		B2C3D4E5F60718293A4B15 /* QuizView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F60718293A4B14 /* QuizView.swift */; };
 		C3D4E5F60718293A4B21 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F60718293A4B20 /* LoginView.swift */; };
+		E5F60718293A4B41C1 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F60718293A4B41C0 /* ChatView.swift */; };
 		C3D4E5F60718293A4B23 /* PrankController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F60718293A4B22 /* PrankController.swift */; };
 		C3D4E5F60718293A4B25 /* LonelinessNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F60718293A4B24 /* LonelinessNotifier.swift */; };
 		C3D4E5F60718293A4B27 /* MissionCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F60718293A4B26 /* MissionCatalog.swift */; };
@@ -68,6 +69,7 @@
 		D4E5F60718293A4B31 /* SupabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F60718293A4B30 /* SupabaseClient.swift */; };
 		D4E5F60718293A4B33 /* SyncQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F60718293A4B32 /* SyncQueue.swift */; };
 		D4E5F60718293A4B35 /* NowPlayingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F60718293A4B34 /* NowPlayingService.swift */; };
+		E6F718293A4B5C60D1 /* SpotifyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F718293A4B5C60D0 /* SpotifyService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -141,12 +143,14 @@
 		B2C3D4E5F60718293A4B11 /* CompanionQuiz.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionQuiz.swift; sourceTree = "<group>"; };
 		B2C3D4E5F60718293A4B14 /* QuizView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuizView.swift; sourceTree = "<group>"; };
 		C3D4E5F60718293A4B20 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		E5F60718293A4B41C0 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		C3D4E5F60718293A4B22 /* PrankController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrankController.swift; sourceTree = "<group>"; };
 		C3D4E5F60718293A4B24 /* LonelinessNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LonelinessNotifier.swift; sourceTree = "<group>"; };
 		C3D4E5F60718293A4B26 /* MissionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionCatalog.swift; sourceTree = "<group>"; };
 		D4E5F60718293A4B30 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
 		D4E5F60718293A4B32 /* SyncQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncQueue.swift; sourceTree = "<group>"; };
 		D4E5F60718293A4B34 /* NowPlayingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingService.swift; sourceTree = "<group>"; };
+		E6F718293A4B5C60D0 /* SpotifyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -158,6 +162,7 @@
 				C3D4E5F60718293A4B24 /* LonelinessNotifier.swift */,
 				1922CA835BC342A2CFDA5E8C /* LLMService.swift */,
 				D4E5F60718293A4B34 /* NowPlayingService.swift */,
+				E6F718293A4B5C60D0 /* SpotifyService.swift */,
 				C3D4E5F60718293A4B22 /* PrankController.swift */,
 				A1B2C3D4E5F60718293A4B01 /* SoundService.swift */,
 				D4E5F60718293A4B30 /* SupabaseClient.swift */,
@@ -198,6 +203,7 @@
 				CB4DA8B5597B5705E8BDA49E /* ContentView.swift */,
 				8A5298218ECF0CB918CC4167 /* Info.plist */,
 				C3D4E5F60718293A4B20 /* LoginView.swift */,
+				E5F60718293A4B41C0 /* ChatView.swift */,
 				B2C3D4E5F60718293A4B14 /* QuizView.swift */,
 				DE4796735B50B3A08E802EAA /* SettingsView.swift */,
 			);
@@ -414,8 +420,10 @@
 				A1B2C3D4E5F60718293A4B04 /* LowEnergyNotifier.swift in Sources */,
 				C3D4E5F60718293A4B25 /* LonelinessNotifier.swift in Sources */,
 				C3D4E5F60718293A4B21 /* LoginView.swift in Sources */,
+				E5F60718293A4B41C1 /* ChatView.swift in Sources */,
 				C3D4E5F60718293A4B27 /* MissionCatalog.swift in Sources */,
 				D4E5F60718293A4B35 /* NowPlayingService.swift in Sources */,
+				E6F718293A4B5C60D1 /* SpotifyService.swift in Sources */,
 				C3D4E5F60718293A4B23 /* PrankController.swift in Sources */,
 				D4E5F60718293A4B31 /* SupabaseClient.swift in Sources */,
 				D4E5F60718293A4B33 /* SyncQueue.swift in Sources */,

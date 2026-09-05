@@ -35,6 +35,19 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Usamos sua localização só para responder perguntas de clima com temperatura real da sua região.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.companion.tamagotchi.spotify</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>companion</string>
+			</array>
+		</dict>
+	</array>
+	<key>SPOTIFY_CLIENT_ID</key>
+	<string>aec5ff46ffa3440fbcee711601e2245b</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -54,6 +67,6 @@
 	<key>SUPABASE_URL</key>
 	<string>https://zlsrurqfkhspwbzmqimp.supabase.co</string>
 	<key>SUPABASE_ANON_KEY</key>
-	<string></string>
+	<string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsc3J1cnFma2hzcHdiem1xaW1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1NjAxNDYsImV4cCI6MjEwNDEzNjE0Nn0.7S3BWjNDP9gCa_o_b3llNMnKLqdawpPuq3M9al3ifqo</string>
 </dict>
 </plist>

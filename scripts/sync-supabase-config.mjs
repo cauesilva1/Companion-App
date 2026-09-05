@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
- * Lê SUPABASE_URL + SUPABASE_ANON_KEY do .env da raiz e propaga para:
- * - apps/desktop/.env
- * - apps/ios/Companion/Info.plist (chaves embutidas no app — usuários não digitam)
- * - apps/ios/Companion/Generated/SupabaseDefaults.plist (cópia legível)
+ * Lê do .env da raiz e propaga para os clients:
+ * - SUPABASE_URL + SUPABASE_ANON_KEY → desktop .env + iOS Info.plist
+ * - SPOTIFY_CLIENT_ID (opcional) → iOS Info.plist (um app Spotify para todos os usuários)
  *
  * Uso: node scripts/sync-supabase-config.mjs
  */
@@ -105,10 +104,13 @@ upsertEnv(path.join(root, "apps/desktop/.env"), {
   API_URL: parseEnv(path.join(root, "apps/desktop/.env")).API_URL || "http://127.0.0.1:3333",
 });
 
+const spotifyId = (rootEnv.SPOTIFY_CLIENT_ID || "").trim();
+
 const infoPath = path.join(root, "apps/ios/Companion/Info.plist");
 let plist = fs.readFileSync(infoPath, "utf8");
 plist = setPlistKey(plist, "SUPABASE_URL", url);
 plist = setPlistKey(plist, "SUPABASE_ANON_KEY", anon && anon.length >= 40 ? anon : "");
+plist = setPlistKey(plist, "SPOTIFY_CLIENT_ID", spotifyId);
 fs.writeFileSync(infoPath, plist);
 
 const genDir = path.join(root, "apps/ios/Companion/Generated");
@@ -123,13 +125,21 @@ fs.writeFileSync(
 \t<string>${escapeXml(url)}</string>
 \t<key>SUPABASE_ANON_KEY</key>
 \t<string>${escapeXml(anon && anon.length >= 40 ? anon : "")}</string>
+\t<key>SPOTIFY_CLIENT_ID</key>
+\t<string>${escapeXml(spotifyId)}</string>
 </dict>
 </plist>
 `
 );
 
-console.log("OK Supabase sync");
+console.log("OK config sync");
 console.log("  URL:", url);
 console.log("  anon:", anon && anon.length >= 40 ? `ok (${anon.length} chars)` : "AUSENTE — cole no .env e rode de novo");
+console.log(
+  "  Spotify Client ID:",
+  spotifyId
+    ? `ok (${spotifyId.slice(0, 8)}…)`
+    : "AUSENTE — opcional; cole SPOTIFY_CLIENT_ID no .env para embutir no iOS"
+);
 console.log("  → apps/desktop/.env");
 console.log("  → apps/ios/Companion/Info.plist");

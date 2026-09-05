@@ -5,13 +5,14 @@ struct CompanionEntry: TimelineEntry {
   let date: Date
   let snapshot: CompanionSnapshot
   let frameIndex: Int
+  /// Texto estável por ciclo (não sorteia a cada frame).
+  let statusLine: String
 }
 
 enum CompanionWidgetTimeline {
-  /// ~14 fps em ciclos curtos — WidgetKit não permite 60fps contínuo.
-  static let frameInterval: TimeInterval = 0.07
-  static let cycleSeconds: TimeInterval = 4.2
-
+  /// ~10 fps — animação do dino; texto fixo no ciclo.
+  static let frameInterval: TimeInterval = 0.1
+  static let cycleSeconds: TimeInterval = 5.0
 
   static func entries(now: Date = Date(), snapshot: CompanionSnapshot) -> [CompanionEntry] {
     #if canImport(UIKit)
@@ -20,25 +21,50 @@ enum CompanionWidgetTimeline {
     #else
     let frameCount = 3
     #endif
+    let status = stableStatus(snapshot)
     let steps = Int(cycleSeconds / frameInterval)
     return (0..<steps).map { i in
       CompanionEntry(
         date: now.addingTimeInterval(Double(i) * frameInterval),
         snapshot: snapshot,
-        frameIndex: i % frameCount
+        frameIndex: i % frameCount,
+        statusLine: status
       )
+    }
+  }
+
+  static func stableStatus(_ snapshot: CompanionSnapshot) -> String {
+    let mood = snapshot.mood.uppercased()
+    switch mood {
+    case "EXCITED": return "\(snapshot.name) tá empolgado"
+    case "HAPPY": return "\(snapshot.name) tá bem"
+    case "CONTENT": return "\(snapshot.name) de boa"
+    case "BORED": return "\(snapshot.name) meio sem graça"
+    case "SLEEPY": return "\(snapshot.name) com sono"
+    case "SAD": return "\(snapshot.name) precisando de você"
+    case "LONELY": return "\(snapshot.name) sentindo falta"
+    default:
+      let t = snapshot.moodText.trimmingCharacters(in: .whitespacesAndNewlines)
+      return t.isEmpty ? "\(snapshot.name) por aqui" : t
     }
   }
 }
 
 struct CompanionProvider: TimelineProvider {
   func placeholder(in context: Context) -> CompanionEntry {
-    CompanionEntry(date: Date(), snapshot: .demo, frameIndex: 0)
+    CompanionEntry(date: Date(), snapshot: .demo, frameIndex: 0, statusLine: "Oi!")
   }
 
   func getSnapshot(in context: Context, completion: @escaping (CompanionEntry) -> Void) {
     let snap = CompanionSnapshotStore.load() ?? .demo
-    completion(CompanionEntry(date: Date(), snapshot: snap, frameIndex: 0))
+    completion(
+      CompanionEntry(
+        date: Date(),
+        snapshot: snap,
+        frameIndex: 0,
+        statusLine: CompanionWidgetTimeline.stableStatus(snap)
+      )
+    )
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<CompanionEntry>) -> Void) {
@@ -78,31 +104,27 @@ struct CompanionHomeView: View {
     }
   }
 
-  private var teaser: String {
-    LocalVoice.widgetTeaser(
-      name: entry.snapshot.name,
-      mood: entry.snapshot.mood,
-      energy: entry.snapshot.energyPercent
-    )
-  }
-
   private var small: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack {
+      HStack(alignment: .top) {
         WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 44)
         Spacer(minLength: 0)
         Text("⚡\(entry.snapshot.energyPercent)%")
           .font(.caption.weight(.bold).monospacedDigit())
-          .foregroundStyle(CompanionTheme.title)
+          .foregroundStyle(Color.black.opacity(0.85))
       }
-      Text(teaser)
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(CompanionTheme.title)
-        .lineLimit(3)
+      Text(entry.snapshot.name)
+        .font(.subheadline.weight(.bold))
+        .foregroundStyle(Color.black.opacity(0.9))
+        .lineLimit(1)
+      Text(entry.statusLine)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(Color.black.opacity(0.7))
+        .lineLimit(2)
         .minimumScaleFactor(0.85)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    .padding(6)
+    .padding(8)
   }
 
   private var medium: some View {
@@ -111,24 +133,24 @@ struct CompanionHomeView: View {
       VStack(alignment: .leading, spacing: 6) {
         Text(entry.snapshot.name)
           .font(.title3.bold())
-          .foregroundStyle(CompanionTheme.title)
-        Text(teaser)
-          .font(.caption)
+          .foregroundStyle(Color.black.opacity(0.92))
+        Text(entry.statusLine)
+          .font(.subheadline.weight(.medium))
           .lineLimit(2)
-          .foregroundStyle(CompanionTheme.subtitle)
+          .foregroundStyle(Color.black.opacity(0.72))
         ProgressView(value: Double(entry.snapshot.energyPercent), total: 100)
           .tint(CompanionTheme.energy)
-        HStack {
-          Text("⚡ \(entry.snapshot.energyPercent)%")
-          Text("♥ \(entry.snapshot.affectionPercent)%")
+        HStack(spacing: 12) {
+          Label("\(entry.snapshot.energyPercent)%", systemImage: "bolt.fill")
+          Label("\(entry.snapshot.affectionPercent)%", systemImage: "heart.fill")
         }
-        .font(.caption2.monospacedDigit())
-        .foregroundStyle(CompanionTheme.subtitle)
+        .font(.caption.weight(.semibold).monospacedDigit())
+        .foregroundStyle(Color.black.opacity(0.65))
       }
       Spacer(minLength: 0)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    .padding(8)
+    .padding(10)
   }
 }
 

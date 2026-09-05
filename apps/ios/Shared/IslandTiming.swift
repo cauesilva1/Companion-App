@@ -28,4 +28,19 @@ enum IslandTiming {
     let u = t / runDuration
     return u * u * (3 - 2 * u)
   }
+
+  /// Progresso 0…1 a partir de `startedAt` (Island continua mesmo se o app morrer).
+  static func progress(since startedAt: Date, now: Date = Date()) -> Double {
+    let elapsed = now.timeIntervalSince(startedAt)
+    guard total > 0 else { return 1 }
+    return max(0, min(1, elapsed / total))
+  }
+
+  static func phase(since startedAt: Date, now: Date = Date()) -> Phase {
+    phase(at: progress(since: startedAt, now: now))
+  }
+
+  static func isExpired(startedAt: Date, now: Date = Date(), grace: TimeInterval = 2) -> Bool {
+    now.timeIntervalSince(startedAt) >= total + grace
+  }
 }

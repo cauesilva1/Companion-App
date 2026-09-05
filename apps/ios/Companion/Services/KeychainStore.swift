@@ -9,6 +9,9 @@ enum KeychainStore {
     case openrouter = "OPENROUTER_API_KEY"
     case authToken = "AUTH_TOKEN"
     case authEmail = "AUTH_EMAIL"
+    case spotifyAccess = "SPOTIFY_ACCESS"
+    case spotifyRefresh = "SPOTIFY_REFRESH"
+    case spotifyExpires = "SPOTIFY_EXPIRES"
   }
 
   static func get(_ key: Key) -> String? {

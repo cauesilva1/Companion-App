@@ -5,6 +5,8 @@ import UIKit
 
 struct SettingsView: View {
   @ObservedObject var model: CompanionViewModel
+  @ObservedObject private var spotify = SpotifyService.shared
+  @ObservedObject private var nowPlaying = NowPlayingService.shared
 
   var body: some View {
     ZStack {
@@ -87,12 +89,42 @@ struct SettingsView: View {
         ))
         .foregroundStyle(CompanionTheme.title)
         .tint(CompanionTheme.play)
-        Toggle("Mostrar música (Now Playing)", isOn: Binding(
+        Toggle("Detectar música (Spotify)", isOn: Binding(
           get: { model.nowPlayingEnabled },
           set: { model.setNowPlaying($0) }
         ))
         .foregroundStyle(CompanionTheme.title)
         .tint(CompanionTheme.play)
+        Toggle("Notificar troca de faixa", isOn: Binding(
+          get: { model.musicNotifEnabled },
+          set: { model.setMusicNotif($0) }
+        ))
+        .foregroundStyle(CompanionTheme.title)
+        .tint(CompanionTheme.play)
+
+        if spotify.isConnected {
+          Text("Spotify conectado · \(nowPlaying.source)")
+            .font(.caption)
+            .foregroundStyle(CompanionTheme.play)
+          Button("Desconectar Spotify") {
+            SpotifyService.shared.disconnect()
+            NowPlayingService.shared.refresh()
+            model.reaction = "Spotify desconectado."
+          }
+          .foregroundStyle(.red)
+        } else if spotify.hasClientId {
+          Button("Conectar Spotify") {
+            Task { await model.connectSpotify() }
+          }
+          .font(.subheadline.weight(.bold))
+        } else {
+          Text("Spotify ainda não embutido neste build (SPOTIFY_CLIENT_ID no .env + sync).")
+            .font(.caption2)
+            .foregroundStyle(CompanionTheme.subtitle)
+        }
+        Text("Login com a conta Spotify de cada pessoa. YouTube/Safari não liberam a faixa.")
+          .font(.caption2)
+          .foregroundStyle(CompanionTheme.subtitle)
         Toggle("Pegadinhas", isOn: Binding(
           get: { model.pranksEnabled },
           set: { model.setPranks($0) }

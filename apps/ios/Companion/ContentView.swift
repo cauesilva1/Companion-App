@@ -26,11 +26,14 @@ final class CompanionViewModel: ObservableObject {
   @Published var missYouNotifEnabled: Bool = LonelinessNotifier.isEnabled
   @Published var pranksEnabled: Bool = PrankController.isEnabled
   @Published var nowPlayingEnabled: Bool = NowPlayingService.isEnabled
+  @Published var musicNotifEnabled: Bool = NowPlayingService.musicNotificationsEnabled
   @Published var needsQuiz: Bool = !CompanionQuiz.isCompleted
   @Published var showAccountPrompt = false
   @Published var isLoggedIn: Bool = false
   @Published var accountEmail: String = ""
   @Published var missions: [LocalMission] = MissionCatalog.ensureToday()
+  @Published var isHatching = false
+  @Published var historyTick: Int = 0
 
   let pranks = PrankController()
   private var ambientTask: Task<Void, Never>?
@@ -39,7 +42,26 @@ final class CompanionViewModel: ObservableObject {
     isLoggedIn && SupabaseConfig.isConfigured && !useLanAPI
   }
 
+  var chatHistory: [ChatTurn] {
+    _ = historyTick
+    let store = CompanionLocalStore.load()
+    let forPet = store.interactions.filter { $0.companionId == snapshot.id && $0.type == .CHAT }
+    let source = forPet.isEmpty
+      ? store.interactions.filter { $0.type == .CHAT }
+      : forPet
+    let items = source.sorted { $0.createdAt < $1.createdAt }.suffix(40)
+    var turns: [ChatTurn] = []
+    for item in items {
+      if let user = item.userMessage, !user.isEmpty {
+        turns.append(ChatTurn(id: item.id + "-u", isUser: true, text: user))
+      }
+      turns.append(ChatTurn(id: item.id + "-a", isUser: false, text: item.reactionText))
+    }
+    return turns
+  }
+
   func bootstrap() async {
+    await LiveActivityController.endExpired()
     if let session = await SupabaseClient.shared.loadSession() {
       isLoggedIn = true
       accountEmail = session.email
@@ -47,6 +69,10 @@ final class CompanionViewModel: ObservableObject {
     missions = MissionCatalog.ensureToday()
     _ = MissionCatalog.bump(kind: "OPEN_APP")
     NowPlayingService.shared.setEnabled(nowPlayingEnabled)
+    if nowPlayingEnabled {
+      _ = await LowEnergyNotifier.requestPermission()
+      NowPlayingService.shared.refresh()
+    }
     if CompanionQuiz.isCompleted {
       apply(snapshot: CompanionSnapshotStore.load() ?? .demo, reaction: nil)
       await refresh()
@@ -67,6 +93,7 @@ final class CompanionViewModel: ObservableObject {
     apply(snapshot: snap, reaction: draft.blurb)
     needsQuiz = false
     status = usesCloud ? "supabase" : "standalone"
+    isHatching = true
     playSprite(.eggMove, queue: [.crack, .hatch, .idle])
     if usesCloud {
       await syncBirthToCloud(snap)
@@ -74,8 +101,15 @@ final class CompanionViewModel: ObservableObject {
       showAccountPrompt = true
     }
     await reloadMissions()
-    startAmbientLife()
-    if pranksEnabled { pranks.startAmbient() }
+    // Ambient só depois do hatch (evita cortar ovo → crack → hatch).
+    Task { [weak self] in
+      try? await Task.sleep(nanoseconds: 4_500_000_000)
+      await MainActor.run {
+        self?.isHatching = false
+        self?.startAmbientLife()
+        if self?.pranksEnabled == true { self?.pranks.startAmbient() }
+      }
+    }
   }
 
   func login(email: String, password: String) async throws {
@@ -141,6 +175,30 @@ final class CompanionViewModel: ObservableObject {
   func setNowPlaying(_ enabled: Bool) {
     nowPlayingEnabled = enabled
     NowPlayingService.shared.setEnabled(enabled)
+    if enabled {
+      Task {
+        _ = await LowEnergyNotifier.requestPermission()
+        NowPlayingService.shared.refresh()
+      }
+    }
+  }
+
+  func setMusicNotif(_ enabled: Bool) {
+    musicNotifEnabled = enabled
+    NowPlayingService.musicNotificationsEnabled = enabled
+    if enabled {
+      Task { _ = await LowEnergyNotifier.requestPermission() }
+    }
+  }
+
+  func connectSpotify() async {
+    do {
+      try await SpotifyService.shared.connect()
+      reaction = "Spotify conectado ✓ — toque uma faixa"
+      NowPlayingService.shared.refresh()
+    } catch {
+      reaction = error.localizedDescription
+    }
   }
 
   func saveKeys() {
@@ -181,6 +239,9 @@ final class CompanionViewModel: ObservableObject {
   func onSpriteBecameIdle() {
     spriteClip = .idle
     followUpQueue = []
+    if isHatching {
+      isHatching = false
+    }
   }
 
   func playSprite(_ clip: DinoClip, queue: [DinoClip] = []) {
@@ -271,7 +332,7 @@ final class CompanionViewModel: ObservableObject {
         let id = try await resolveLanId()
         let message = type == "CHAT" ? chatText : nil
         let (snap, line) = try await CompanionAPI.shared.interact(id: id, type: type, message: message)
-        if type == "CHAT" { chatText = "" }
+        if type == "CHAT" { chatText = ""; historyTick &+= 1 }
         apply(snapshot: snap, reaction: interaction == .PLAY ? reaction : (line ?? "…"))
         await reloadMissions()
       } catch {
@@ -292,7 +353,7 @@ final class CompanionViewModel: ObservableObject {
     }
 
     let (snap, line) = await CompanionEngine.shared.interact(type: interaction, message: message)
-    if type == "CHAT" { chatText = "" }
+    if type == "CHAT" { chatText = ""; historyTick &+= 1 }
     if let kind = MissionCatalog.kindFromInteraction(type) {
       missions = MissionCatalog.bump(kind: kind)
     }
@@ -352,6 +413,7 @@ final class CompanionViewModel: ObservableObject {
         guard !Task.isCancelled, let self else { return }
         if sleepy { continue }
         if self.needsQuiz { continue }
+        if self.isHatching { continue }
         if self.spriteClip != .idle { continue }
         if self.pranks.hidden { continue }
         let clip: DinoClip = Bool.random() ? .move : .dash
@@ -406,6 +468,8 @@ struct ContentView: View {
   @ObservedObject private var nowPlaying = NowPlayingService.shared
   @Environment(\.scenePhase) private var scenePhase
   @State private var showSettings = false
+  @State private var showChat = false
+  @State private var showMissions = false
 
   var body: some View {
     NavigationStack {
@@ -419,9 +483,7 @@ struct ContentView: View {
             }
             statsCard
             speechCard
-            missionsCard
             actions
-            chatBar
           }
           .padding(.horizontal, 18)
           .padding(.top, 12)
@@ -439,6 +501,24 @@ struct ContentView: View {
               .foregroundStyle(CompanionTheme.title)
           }
           .accessibilityLabel("Configuração")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+          HStack(spacing: 14) {
+            Button {
+              showMissions = true
+            } label: {
+              Image(systemName: "flag.fill")
+                .foregroundStyle(CompanionTheme.title)
+            }
+            .accessibilityLabel("Missões")
+            Button {
+              showChat = true
+            } label: {
+              Image(systemName: "bubble.left.and.bubble.right.fill")
+                .foregroundStyle(CompanionTheme.title)
+            }
+            .accessibilityLabel("Conversar")
+          }
         }
       }
       .toolbarBackground(.hidden, for: .navigationBar)
@@ -460,14 +540,30 @@ struct ContentView: View {
             }
         }
       }
+      .sheet(isPresented: $showChat) {
+        NavigationStack {
+          ChatView(model: model)
+        }
+      }
+      .sheet(isPresented: $showMissions) {
+        MissionsSheet(model: model)
+      }
       .task { await model.bootstrap() }
+      .onReceive(NotificationCenter.default.publisher(for: .companionNowPlayingChanged)) { note in
+        if let line = note.userInfo?["line"] as? String, !line.isEmpty {
+          model.reaction = line
+        }
+      }
       .onChange(of: scenePhase) { phase in
         if phase == .background, !model.needsQuiz {
           model.startIslandOnLeave()
         }
         if phase == .active {
           NowPlayingService.shared.refresh()
-          Task { await SyncQueue.flush() }
+          Task {
+            await LiveActivityController.endExpired()
+            await SyncQueue.flush()
+          }
         }
       }
     }
@@ -567,47 +663,6 @@ struct ContentView: View {
     }
   }
 
-  private var missionsCard: some View {
-    CompanionCard {
-      VStack(alignment: .leading, spacing: 10) {
-        Text("Missões de hoje")
-          .font(.headline)
-          .foregroundStyle(CompanionTheme.title)
-        ForEach(model.missions) { mission in
-          VStack(alignment: .leading, spacing: 4) {
-            HStack {
-              Text(mission.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(CompanionTheme.title)
-              Spacer()
-              Text("\(mission.progress)/\(mission.target)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(CompanionTheme.subtitle)
-            }
-            Text(mission.description)
-              .font(.caption)
-              .foregroundStyle(CompanionTheme.subtitle)
-            ProgressView(value: Double(mission.progress), total: Double(max(1, mission.target)))
-              .tint(CompanionTheme.play)
-            if mission.complete && !mission.claimed {
-              Button("Resgatar +\(mission.rewardEnergy)⚡ +\(mission.rewardAffection)❤") {
-                Task { await model.claimMission(mission) }
-              }
-              .font(.caption.weight(.bold))
-              .buttonStyle(.borderedProminent)
-              .tint(CompanionTheme.feed)
-            } else if mission.claimed {
-              Text("Resgatada")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(CompanionTheme.play)
-            }
-          }
-          .padding(.vertical, 4)
-        }
-      }
-    }
-  }
-
   private var actions: some View {
     CompanionCard {
       VStack(spacing: 10) {
@@ -625,6 +680,12 @@ struct ContentView: View {
         HStack(spacing: 10) {
           actionButton("Piada", system: "face.smiling.fill", color: CompanionTheme.affection) {
             await model.interact("TEASE")
+          }
+          actionButton("Falar", system: "bubble.left.fill", color: CompanionTheme.play) {
+            await MainActor.run { showChat = true }
+          }
+          actionButton("Missões", system: "flag.fill", color: CompanionTheme.energy) {
+            await MainActor.run { showMissions = true }
           }
         }
       }
@@ -650,32 +711,6 @@ struct ContentView: View {
     .accessibilityLabel(title)
     .disabled(model.isBusy)
     .opacity(model.isBusy ? 0.75 : 1)
-  }
-
-  private var chatBar: some View {
-    CompanionCard {
-      HStack(spacing: 8) {
-        TextField("Digite sua mensagem…", text: $model.chatText)
-          .foregroundStyle(CompanionTheme.title)
-          .padding(12)
-          .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-              .fill(Color(red: 0.94, green: 0.96, blue: 1.0))
-          )
-        Button {
-          Task { await model.interact("CHAT") }
-        } label: {
-          Text("Enviar")
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(RoundedRectangle(cornerRadius: 14).fill(CompanionTheme.play))
-        }
-        .buttonStyle(.plain)
-        .disabled(model.isBusy || model.chatText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-      }
-    }
   }
 }
 

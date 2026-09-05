@@ -86,6 +86,15 @@ enum LiveActivityController {
     }
   }
 
+  /// Encerra Islands órfãs (app foi morto no meio da animação).
+  static func endExpired() async {
+    for activity in Activity<CompanionAttributes>.activities {
+      if IslandTiming.isExpired(startedAt: activity.attributes.startedAt) {
+        await endActivity(activity)
+      }
+    }
+  }
+
   private static func animateIsland(
     activityId: String,
     skin: String,

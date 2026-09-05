@@ -24,13 +24,7 @@ struct CompanionLockView: View {
   @Environment(\.widgetFamily) private var family
   let entry: CompanionEntry
 
-  private var teaser: String {
-    LocalVoice.widgetTeaser(
-      name: entry.snapshot.name,
-      mood: entry.snapshot.mood,
-      energy: entry.snapshot.energyPercent
-    )
-  }
+  private var teaser: String { entry.statusLine }
 
   var body: some View {
     switch family {
@@ -44,7 +38,7 @@ struct CompanionLockView: View {
         }
       }
     case .accessoryInline:
-      Text(teaser)
+      Text("\(entry.snapshot.name) · \(teaser)")
     default:
       HStack(spacing: 8) {
         WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 34)

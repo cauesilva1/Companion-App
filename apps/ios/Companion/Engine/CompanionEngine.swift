@@ -179,13 +179,42 @@ actor CompanionEngine {
         notes.append("Usuário se chama \(message[nameRange])")
       }
     }
+    if let style = speechStyleNote(from: message) {
+      notes.append(style)
+    }
     return notes
   }
 
+  /// Perfil curto do jeito de falar (para o LLM espelhar).
+  private func speechStyleNote(from message: String) -> String? {
+    let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.count >= 8 else { return nil }
+    let words = trimmed.split(whereSeparator: { $0.isWhitespace }).count
+    let hasEmoji = trimmed.unicodeScalars.contains { $0.properties.isEmoji && ($0.value > 0x238C) }
+    let lower = trimmed.lowercased()
+    let slang = ["kkk", "rs", "mano", "véi", "vei", "tipo", "né", "pra", "tb", "tbm", "blz", "vlw"]
+      .filter { lower.contains($0) }
+    var bits: [String] = []
+    if words <= 6 { bits.append("frases curtas") }
+    else if words >= 18 { bits.append("fala mais longa") }
+    if hasEmoji { bits.append("usa emoji") }
+    if !slang.isEmpty { bits.append("informal (\(slang.prefix(3).joined(separator: ", ")))") }
+    if trimmed.contains("!") { bits.append("entusiasmado") }
+    if trimmed.hasSuffix("?") { bits.append("faz perguntas") }
+    guard !bits.isEmpty else { return nil }
+    return "Estilo do usuário: " + bits.joined(separator: "; ")
+  }
+
   private func mergeMemory(_ companion: inout StoredCompanion, _ extras: [String]) {
-    var list = companion.memoryNotes
-    for note in extras where !list.contains(where: { $0.caseInsensitiveCompare(note) == .orderedSame }) {
-      list.insert(note, at: 0)
+    var list = companion.memoryNotes.filter { !$0.hasPrefix("Estilo do usuário:") }
+    for note in extras {
+      if note.hasPrefix("Estilo do usuário:") {
+        list.insert(note, at: 0)
+        continue
+      }
+      if !list.contains(where: { $0.caseInsensitiveCompare(note) == .orderedSame }) {
+        list.insert(note, at: 0)
+      }
     }
     companion.memoryNotes = Array(list.prefix(8))
     if let nameNote = extras.first(where: { $0.hasPrefix("Usuário se chama ") }) {
