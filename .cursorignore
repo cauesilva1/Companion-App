@@ -1,0 +1,38 @@
+# Dependências e builds — não indexar (CPU/RAM do Cursor)
+node_modules/
+**/node_modules/
+dist/
+build/
+.cache/
+.turbo/
+coverage/
+
+# Electron bundle / artefatos locais (centenas de MB)
+apps/desktop/release/
+apps/desktop/resources/
+apps/desktop/dist/
+*.dmg
+*.exe
+*.AppImage
+out/
+
+# Dados locais e secrets
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# iOS / Xcode gerados
+**/DerivedData/
+**/xcuserdata/
+**/*.xcuserstate
+apps/ios/**/build/
+
+# Logs e lixo
+*.log
+tmp/
+temp/
+.DS_Store

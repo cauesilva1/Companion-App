@@ -8,7 +8,7 @@ struct CompanionLockWidget: Widget {
   var body: some WidgetConfiguration {
     StaticConfiguration(kind: kind, provider: CompanionProvider()) { entry in
       CompanionLockView(entry: entry)
-        .companionWidgetBackground()
+        .companionMockupWidgetBackground()
     }
     .configurationDisplayName("Companion Lock")
     .description("Seu dino na tela de bloqueio.")
@@ -24,27 +24,38 @@ struct CompanionLockView: View {
   @Environment(\.widgetFamily) private var family
   let entry: CompanionEntry
 
+  private var teaser: String {
+    LocalVoice.widgetTeaser(
+      name: entry.snapshot.name,
+      mood: entry.snapshot.mood,
+      energy: entry.snapshot.energyPercent
+    )
+  }
+
   var body: some View {
     switch family {
     case .accessoryCircular:
       ZStack {
         AccessoryWidgetBackground()
-        DinoAvatar(skin: entry.snapshot.skin, size: 28)
+        VStack(spacing: 0) {
+          WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 26)
+          Text("\(entry.snapshot.energyPercent)")
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+        }
       }
     case .accessoryInline:
-      Text("\(entry.snapshot.name) · \(entry.snapshot.energyPercent)%")
+      Text(teaser)
     default:
       HStack(spacing: 8) {
-        DinoAvatar(skin: entry.snapshot.skin, size: 36)
+        WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 34)
         VStack(alignment: .leading, spacing: 2) {
           Text(entry.snapshot.name)
             .font(.headline)
-          Text(entry.snapshot.moodText)
+          Text(teaser)
             .font(.caption2)
             .lineLimit(2)
-          Text("⚡\(entry.snapshot.energyPercent) ❤️\(entry.snapshot.affectionPercent)")
-            .font(.caption2)
         }
+        Spacer(minLength: 0)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }

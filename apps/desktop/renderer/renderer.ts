@@ -25,58 +25,58 @@ interface CompanionDraft {
 
 const QUIZ: QuizQuestion[] = [
   {
-    id: "cafe-line",
-    prompt: "Alguém fura a fila do café. Você…",
+    id: "morning",
+    prompt: "De manhã, o companion te chama. Você quer que ele…",
     options: [
-      { label: "Chama a pessoa e pergunta a história toda", scores: { archetype: { curioso: 3 } } },
-      { label: "Finge que não viu e continua no celular", scores: { archetype: { preguicoso: 3 } } },
-      { label: "Puxa a pessoa de lado e oferece seu lugar", scores: { archetype: { carinhoso: 3 } } },
-      { label: "Faz um comentário alto e irônico", scores: { archetype: { zoeiro: 3 } } },
-      { label: "Observa em silêncio e anota o padrão", scores: { archetype: { misterioso: 3 } } },
+      { label: "Pergunte o plano do dia e fique curioso com tudo", scores: { archetype: { curioso: 3 } } },
+      { label: "Fale pouco, deixe você acordar no seu ritmo", scores: { archetype: { preguicoso: 3 } } },
+      { label: "Mande carinho e diga que sentiu sua falta", scores: { archetype: { carinhoso: 3 } } },
+      { label: "Te zoa e diga que já passou da hora", scores: { archetype: { zoeiro: 3 } } },
+      { label: "Só apareça quieto, como se já soubesse o clima", scores: { archetype: { misterioso: 3 } } },
     ],
   },
   {
-    id: "secret",
-    prompt: "Um amigo te conta um segredo pesado. Você…",
+    id: "away",
+    prompt: "Você some por horas. Quando volta, o ideal é…",
     options: [
-      { label: "Faz mil perguntas até entender tudo", scores: { archetype: { curioso: 3 } } },
-      { label: "Diz “ok” e volta a deitar no sofá", scores: { archetype: { preguicoso: 3 } } },
-      { label: "Abraça e muda de assunto com carinho", scores: { archetype: { carinhoso: 3 } } },
-      { label: "Espalha de brincadeira… e se arrepende", scores: { archetype: { zoeiro: 3 } } },
-      { label: "Guarda. Nem confirma, nem nega", scores: { archetype: { misterioso: 3 } } },
+      { label: "Ele bombardear com “onde foi? o que rolou?”", scores: { archetype: { curioso: 3 } } },
+      { label: "Ele estar de boa, sem drama, como se nada", scores: { archetype: { preguicoso: 3 } } },
+      { label: "Ele admitir saudade e querer um momento junto", scores: { archetype: { carinhoso: 3 } } },
+      { label: "Ele fazer teatro: “ah, finalmente lembrou de mim”", scores: { archetype: { zoeiro: 3 } } },
+      { label: "Ele só olhar e soltar uma frase enigmática", scores: { archetype: { misterioso: 3 } } },
     ],
   },
   {
-    id: "gift",
-    prompt: "Chega uma caixa surpresa com seu nome. Você…",
+    id: "chat",
+    prompt: "No chat, o companion deve ser mais…",
     options: [
-      { label: "Abre na hora e investiga cada detalhe", scores: { archetype: { curioso: 3 } } },
-      { label: "Deixa pro domingo — sem pressa", scores: { archetype: { preguicoso: 3 } } },
-      { label: "Manda foto pra quem enviou, emocionado", scores: { archetype: { carinhoso: 3 } } },
-      { label: "Faz um teatro inteiro antes de abrir", scores: { archetype: { zoeiro: 3 } } },
-      { label: "Cheira a caixa, balança, sem abrir ainda", scores: { archetype: { misterioso: 3 } } },
+      { label: "Perguntão — quer entender você e o mundo", scores: { archetype: { curioso: 3 } } },
+      { label: "Curto e seco — poucas palavras, sem pressão", scores: { archetype: { preguicoso: 3 } } },
+      { label: "Afetuoso — valida, apoia, fica perto", scores: { archetype: { carinhoso: 3 } } },
+      { label: "Zoeira — piada, exagero, leveza", scores: { archetype: { zoeiro: 3 } } },
+      { label: "Profundo — poucas falas, mas com peso", scores: { archetype: { misterioso: 3 } } },
     ],
   },
   {
-    id: "conflict",
-    prompt: "Alguém te corta no meio de uma conversa. Você…",
+    id: "music",
+    prompt: "Uma música começa a tocar no celular. O companion…",
     options: [
-      { label: "Pergunta o que a pessoa queria dizer", scores: { archetype: { curioso: 2, carinhoso: 1 } } },
-      { label: "Desliga mentalmente e deixa rolar", scores: { archetype: { preguicoso: 3 } } },
-      { label: "Volta depois com um “ei, eu ainda estou aqui”", scores: { archetype: { carinhoso: 3 } } },
-      { label: "Responde com uma zoação na hora", scores: { archetype: { zoeiro: 3 } } },
-      { label: "Fecha a cara e some da conversa", scores: { archetype: { misterioso: 3 } } },
+      { label: "Quer saber a faixa, o artista, o porquê", scores: { archetype: { curioso: 3 } } },
+      { label: "Curte em silêncio, sem atrapalhar", scores: { archetype: { preguicoso: 3 } } },
+      { label: "Comenta como se fosse a trilha de vocês dois", scores: { archetype: { carinhoso: 3 } } },
+      { label: "Julga a playlist com humor (sem maldade)", scores: { archetype: { zoeiro: 3 } } },
+      { label: "Só diz que a vibe “revela algo”", scores: { archetype: { misterioso: 3 } } },
     ],
   },
   {
-    id: "mirror",
-    prompt: "Se o companion te imitasse, ele seria…",
+    id: "vibe",
+    prompt: "No fim das contas, você quer um companion que seja…",
     options: [
-      { label: "Perguntão, sempre no seu pé", scores: { archetype: { curioso: 4 } } },
-      { label: "Lento, ácido, mestre do “depois”", scores: { archetype: { preguicoso: 4 } } },
-      { label: "Colado em você, cheio de carinho", scores: { archetype: { carinhoso: 4 } } },
-      { label: "Dramático e pronto pra zoar", scores: { archetype: { zoeiro: 4 } } },
-      { label: "Calado, observando tudo", scores: { archetype: { misterioso: 4 } } },
+      { label: "Seu parceiro de curiosidade — sempre no seu pé", scores: { archetype: { curioso: 4 } } },
+      { label: "Seu canto preguiçoso — presença sem cobrança", scores: { archetype: { preguicoso: 4 } } },
+      { label: "Seu aconchego — carinho e companhia", scores: { archetype: { carinhoso: 4 } } },
+      { label: "Seu cúmplice de zoação — leve e dramático", scores: { archetype: { zoeiro: 4 } } },
+      { label: "Seu mistério calado — observa e aparece na hora certa", scores: { archetype: { misterioso: 4 } } },
     ],
   },
 ];
@@ -182,17 +182,27 @@ interface CompanionSettings {
   commentMedia?: boolean;
   screenVision?: boolean;
   streakCount?: number;
-  missions?: { day?: string; done?: string[] };
+  missions?: {
+    day?: string;
+    items?: Array<{
+      id: string;
+      kind: string;
+      title: string;
+      description: string;
+      target: number;
+      progress: number;
+      claimed: boolean;
+    }>;
+  };
   screenHint?: string;
   screenApp?: string;
+  authEmail?: string;
+  loggedIn?: boolean;
+  apiUrl?: string;
+  supabaseConfigured?: boolean;
 }
 
-const MISSION_IDS = ["play", "chat", "music"] as const;
-const MISSION_LABELS: Record<(typeof MISSION_IDS)[number], string> = {
-  play: "Brincar",
-  chat: "Conversar",
-  music: "Ouvir música",
-};
+const MISSION_HINT = "Mesmas missões do iPhone (rotação diária).";
 
 interface InteractionResult {
   companion: CompanionState;
@@ -248,6 +258,9 @@ interface CompanionWindow {
     interact: (type: string, message?: string) => Promise<IpcResult<InteractionResult>>;
     getFeed: (limit?: number) => Promise<IpcResult<FeedItem[]>>;
     createCompanion: (body: object) => Promise<IpcResult<CompanionState>>;
+    login: (email: string, password: string) => Promise<IpcResult<{ email?: string; companionId?: string }>>;
+    register: (email: string, password: string) => Promise<IpcResult<{ email?: string }>>;
+    logout: () => Promise<{ ok: boolean }>;
     getSession: () => Promise<CompanionSettings>;
     getSettings: () => Promise<CompanionSettings>;
     setSettings: (patch: object) => Promise<CompanionSettings>;
@@ -1031,13 +1044,24 @@ function applySettingsToForm(settings: CompanionSettings) {
   setCheck("cfgCommentMedia", settings.commentMedia !== false);
   setCheck("cfgScreenVision", !!settings.screenVision);
 
+  const authStatus = document.getElementById("cfgAuthStatus");
+  if (authStatus) {
+    authStatus.textContent = settings.loggedIn
+      ? `Supabase: ${settings.authEmail || "ok"}`
+        : settings.supabaseConfigured
+          ? "Desconectado — entre com email/senha"
+          : "Falta SUPABASE_* no .env (rode sync-supabase-config)";
+  }
+  const authEmailInput = document.getElementById("cfgAuthEmail") as HTMLInputElement | null;
+  if (authEmailInput && settings.authEmail) authEmailInput.value = settings.authEmail;
+
   const eye = document.getElementById("screenEye") as HTMLElement | null;
   if (eye) eye.hidden = !(settings.perceiveApp !== false);
 
   document.body.classList.toggle("focus-mode", !!settings.focusMode);
 
   const streak = settings.streakCount ?? 0;
-  const done = settings.missions?.done ?? [];
+  const items = settings.missions?.items ?? [];
   const strip = document.getElementById("missionsStrip") as HTMLElement | null;
   // Missões ficam só no Config — home limpa
   if (strip) strip.hidden = true;
@@ -1048,10 +1072,16 @@ function applySettingsToForm(settings: CompanionSettings) {
   const list = document.getElementById("missionsList");
   if (list) {
     list.innerHTML = "";
-    for (const id of MISSION_IDS) {
+    for (const m of items) {
       const li = document.createElement("li");
-      li.textContent = MISSION_LABELS[id];
-      if (done.includes(id)) li.classList.add("done");
+      const prog = `${m.progress}/${m.target}`;
+      li.textContent = `${m.title} (${prog})`;
+      if (m.claimed || m.progress >= m.target) li.classList.add("done");
+      list.appendChild(li);
+    }
+    if (items.length === 0) {
+      const li = document.createElement("li");
+      li.textContent = "Sem missões hoje";
       list.appendChild(li);
     }
   }
@@ -1060,8 +1090,8 @@ function applySettingsToForm(settings: CompanionSettings) {
   if (hint) {
     hint.textContent =
       streak > 0
-        ? `Sequência de ${streak} dia${streak === 1 ? "" : "s"}.`
-        : "Complete missões para manter a sequência.";
+        ? `Sequência de ${streak} dia${streak === 1 ? "" : "s"}. ${MISSION_HINT}`
+        : MISSION_HINT;
   }
 
   if (typeof settings.compact === "boolean") applyCompactUi(settings.compact);
@@ -1126,6 +1156,44 @@ function bindSettingsPanel() {
   bindCheck("cfgWindowTitle", "useWindowTitle");
   bindCheck("cfgCommentMedia", "commentMedia");
   bindCheck("cfgScreenVision", "screenVision");
+
+  const authEmailEl = document.getElementById("cfgAuthEmail") as HTMLInputElement | null;
+  const authPassEl = document.getElementById("cfgAuthPassword") as HTMLInputElement | null;
+  document.getElementById("cfgAuthLogin")?.addEventListener("click", async () => {
+    const email = authEmailEl?.value.trim() || "";
+    const password = authPassEl?.value || "";
+    if (!email || password.length < 6) {
+      showError("Email e senha (mín. 6) obrigatórios");
+      return;
+    }
+    const result = await cw.companion.login(email, password);
+    if (!result.ok) {
+      showError(result.error ?? "Login falhou");
+      return;
+    }
+    showSpeech("Conta conectada ✓", 3000);
+    const st = await cw.companion.getState();
+    if (st.ok && st.data) applyState(st.data);
+    await refreshSettings();
+  });
+  document.getElementById("cfgAuthRegister")?.addEventListener("click", async () => {
+    const email = authEmailEl?.value.trim() || "";
+    const password = authPassEl?.value || "";
+    if (!email || password.length < 6) {
+      showError("Email e senha (mín. 6) obrigatórios");
+      return;
+    }
+    const result = await cw.companion.register(email, password);
+    if (!result.ok) {
+      showError(result.error ?? "Cadastro falhou");
+      return;
+    }
+    showSpeech("Conta criada ✓ — faça o quiz se ainda não tiver pet", 4000);
+  });
+  document.getElementById("cfgAuthLogout")?.addEventListener("click", async () => {
+    await cw.companion.logout();
+    showSpeech("Saiu da conta", 2500);
+  });
 
   $<HTMLButtonElement>("cfgOpenHabitat").addEventListener("click", () => {
     closeSettingsPanel();

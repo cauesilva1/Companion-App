@@ -40,7 +40,9 @@
     "electronVersion": "31.7.7",
     "mac": {
       "category": "public.app-category.entertainment",
-      "target": ["dir"],
+      "target": [
+        "dir"
+      ],
       "identity": null
     },
     "npmRebuild": false,
@@ -57,6 +59,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.115.0",
     "dotenv": "^16.4.0"
   }
 }

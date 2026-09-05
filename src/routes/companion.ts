@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
+import { InteractionType } from "@prisma/client";
 import { prisma } from "../db";
 import { applyTimeDecay, applyInteraction } from "../moodEngine";
 import { generateReaction } from "../llm";
 import { computeAlert, moodText } from "../companionStatus";
-import { InteractionType } from "@prisma/client";
+import { AuthedRequest, requireAuth } from "../auth";
+import { bumpMission, kindFromInteraction } from "../missions";
 
 export const companionRouter = Router();
 
@@ -17,126 +19,143 @@ const createSchema = z.object({
   archetype: z.string().max(40).optional(),
 });
 
-companionRouter.post("/", async (req, res) => {
+function companionPayload(c: {
+  id: string;
+  name: string;
+  personality: string;
+  skin: string;
+  artStyle: string;
+  backdrop: string;
+  archetype: string;
+  mood: import("@prisma/client").Mood;
+  energy: number;
+  affection: number;
+  lastInteractionAt: Date;
+  pendingAlert: string | null;
+  memoryNotes: string[];
+}) {
+  return {
+    id: c.id,
+    name: c.name,
+    personality: c.personality,
+    skin: c.skin,
+    artStyle: c.artStyle,
+    backdrop: c.backdrop,
+    archetype: c.archetype,
+    mood: c.mood,
+    energy: c.energy,
+    affection: c.affection,
+    lastInteractionAt: c.lastInteractionAt,
+    moodText: moodText(c.name, c.mood),
+    alert: c.pendingAlert ?? computeAlert(c.name, c.mood),
+    memoryNotes: c.memoryNotes,
+  };
+}
+
+companionRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const user = await prisma.user.upsert({
-    where: { email: "local@companion.dev" },
-    update: {},
-    create: { email: "local@companion.dev" },
-  });
+  const userId = req.auth!.userId;
+  const existing = await prisma.companion.findFirst({ where: { userId } });
+  if (existing) {
+    return res.status(200).json(companionPayload(existing));
+  }
 
   const created = await prisma.companion.create({
     data: {
-      userId: user.id,
+      userId,
       name: parsed.data.name,
-      personality: parsed.data.personality ?? "curioso",
-      skin: parsed.data.skin ?? "blob",
+      personality: parsed.data.personality ?? parsed.data.archetype ?? "curioso",
+      skin: parsed.data.skin ?? "dino-mort",
+      artStyle: parsed.data.artStyle ?? "pixel",
+      backdrop: parsed.data.backdrop ?? "sky",
+      archetype: parsed.data.archetype ?? "curioso",
     },
   });
 
-  return res.status(201).json({
-    id: created.id,
-    name: created.name,
-    personality: created.personality,
-    skin: created.skin,
-    mood: created.mood,
-    energy: created.energy,
-    affection: created.affection,
-    moodText: moodText(created.name, created.mood),
-  });
+  return res.status(201).json(companionPayload(created));
 });
 
-/**
- * GET /companion/:id/state
- * Retorna o estado atual do companion, ja aplicando o decay de tempo.
- * Isso e o endpoint que o widget (iOS/PC) chama pra saber o que desenhar.
- */
-companionRouter.get("/:id/state", async (req, res) => {
-  const companion = await prisma.companion.findUnique({ where: { id: req.params.id } });
-  if (!companion) return res.status(404).json({ error: "Companion nao encontrado" });
+companionRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
+  const companion = await prisma.companion.findFirst({
+    where: { userId: req.auth!.userId },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!companion) return res.status(404).json({ error: "no_companion" });
 
   const now = new Date();
   const decayed = applyTimeDecay(companion, now);
-
   const updated = await prisma.companion.update({
     where: { id: companion.id },
-    data: { energy: decayed.energy, affection: decayed.affection, mood: decayed.mood, lastDecayAt: now },
+    data: {
+      energy: decayed.energy,
+      affection: decayed.affection,
+      mood: decayed.mood,
+      lastDecayAt: now,
+    },
   });
-
-  return res.json({
-    id: updated.id,
-    name: updated.name,
-    personality: updated.personality,
-    skin: updated.skin,
-    mood: updated.mood,
-    energy: updated.energy,
-    affection: updated.affection,
-    lastInteractionAt: updated.lastInteractionAt,
-    moodText: moodText(updated.name, updated.mood),
-    alert: computeAlert(updated.name, updated.mood),
-  });
+  return res.json(companionPayload(updated));
 });
 
-companionRouter.get("/:id/status", async (req, res) => {
-  const companion = await prisma.companion.findUnique({ where: { id: req.params.id } });
+async function loadOwned(req: AuthedRequest, id: string) {
+  return prisma.companion.findFirst({
+    where: { id, userId: req.auth!.userId },
+  });
+}
+
+companionRouter.get("/:id/state", requireAuth, async (req: AuthedRequest, res) => {
+  const companion = await loadOwned(req, req.params.id);
   if (!companion) return res.status(404).json({ error: "Companion nao encontrado" });
 
   const now = new Date();
   const decayed = applyTimeDecay(companion, now);
   const updated = await prisma.companion.update({
     where: { id: companion.id },
-    data: { energy: decayed.energy, affection: decayed.affection, mood: decayed.mood, lastDecayAt: now },
+    data: {
+      energy: decayed.energy,
+      affection: decayed.affection,
+      mood: decayed.mood,
+      lastDecayAt: now,
+    },
   });
-
-  return res.json({
-    id: updated.id,
-    name: updated.name,
-    mood: updated.mood,
-    energy: updated.energy,
-    affection: updated.affection,
-    moodText: moodText(updated.name, updated.mood),
-    alert: computeAlert(updated.name, updated.mood),
-  });
+  return res.json(companionPayload(updated));
 });
 
 const interactSchema = z.object({
-  type: z.nativeEnum(InteractionType),
+  type: z.enum(["POKE", "FEED", "CHAT", "PLAY", "TEASE", "IGNORE_CHECK"]),
   message: z.string().max(500).optional(),
 });
 
-/**
- * POST /companion/:id/interact
- * Body: { type: "POKE" | "FEED" | "PLAY" | "CHAT", message?: string }
- * Aplica a interacao, gera a fala da IA e retorna o novo estado + reacao.
- */
-companionRouter.post("/:id/interact", async (req, res) => {
+companionRouter.post("/:id/interact", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = interactSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const companion = await prisma.companion.findUnique({ where: { id: req.params.id } });
+  const companion = await loadOwned(req, req.params.id);
   if (!companion) return res.status(404).json({ error: "Companion nao encontrado" });
 
   const now = new Date();
   const daysSinceInteraction =
     (now.getTime() - companion.lastInteractionAt.getTime()) / (1000 * 60 * 60 * 24);
 
-  // 1. aplica decay de tempo primeiro, depois a interacao em cima do resultado
+  const type = parsed.data.type as InteractionType;
   const decayed = applyTimeDecay(companion, now);
-  const result = applyInteraction(decayed.energy, decayed.affection, parsed.data.type, daysSinceInteraction);
+  const result = applyInteraction(
+    decayed.energy,
+    decayed.affection,
+    type,
+    daysSinceInteraction
+  );
 
-  // 2. gera a fala via IA (com fallback local se a API falhar)
   const reactionText = await generateReaction({
-    companion,
-    type: parsed.data.type,
+    companion: { ...companion, archetype: companion.archetype },
+    type,
     mood: result.mood,
     energy: result.energy,
     affection: result.affection,
-    userMessage: parsed.data.message,
+    userMessage: parsed.data.message ?? (type === "TEASE" ? "conta uma piada" : undefined),
   });
 
-  // 3. persiste tudo
   const [updatedCompanion, interaction] = await prisma.$transaction([
     prisma.companion.update({
       where: { id: companion.id },
@@ -146,12 +165,13 @@ companionRouter.post("/:id/interact", async (req, res) => {
         mood: result.mood,
         lastDecayAt: now,
         lastInteractionAt: now,
+        pendingAlert: null,
       },
     }),
     prisma.interaction.create({
       data: {
         companionId: companion.id,
-        type: parsed.data.type,
+        type,
         userMessage: parsed.data.message,
         reactionText,
         moodAfter: result.mood,
@@ -161,15 +181,13 @@ companionRouter.post("/:id/interact", async (req, res) => {
     }),
   ]);
 
+  const missionKind = kindFromInteraction(type);
+  if (missionKind) {
+    await bumpMission(req.auth!.userId, missionKind, 1);
+  }
+
   return res.json({
-    companion: {
-      id: updatedCompanion.id,
-      name: updatedCompanion.name,
-      mood: updatedCompanion.mood,
-      energy: updatedCompanion.energy,
-      affection: updatedCompanion.affection,
-      moodText: moodText(updatedCompanion.name, updatedCompanion.mood),
-    },
+    companion: companionPayload(updatedCompanion),
     reaction: interaction.reactionText,
     interaction: {
       id: interaction.id,
@@ -180,14 +198,12 @@ companionRouter.post("/:id/interact", async (req, res) => {
   });
 });
 
-/**
- * GET /companion/:id/feed?limit=20
- * Historico de interacoes - equivalente ao "feed social" que aparecia no video.
- */
-companionRouter.get("/:id/feed", async (req, res) => {
+companionRouter.get("/:id/feed", requireAuth, async (req: AuthedRequest, res) => {
+  const companion = await loadOwned(req, req.params.id);
+  if (!companion) return res.status(404).json({ error: "Companion nao encontrado" });
   const limit = Math.min(Number(req.query.limit) || 20, 50);
   const interactions = await prisma.interaction.findMany({
-    where: { companionId: req.params.id },
+    where: { companionId: companion.id },
     orderBy: { createdAt: "desc" },
     take: limit,
   });

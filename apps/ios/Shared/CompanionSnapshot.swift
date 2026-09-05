@@ -7,6 +7,8 @@ enum CompanionAppGroup {
   static let snapshotKey = "companion.snapshot.v1"
   static let companionIdKey = "companion.id"
   static let apiBaseKey = "companion.apiBase"
+  static let cloudApiBaseKey = "companion.cloudApiBase"
+  static let useLanAPIKey = "companion.useLanAPI"
 
   /// Personal Team às vezes não provisiona App Group — cai no standard.
   static var defaults: UserDefaults {
@@ -134,6 +136,31 @@ enum CompanionSnapshotStore {
       return s
     }
     return UserDefaults.standard.string(forKey: CompanionAppGroup.apiBaseKey)
+  }
+
+  /// Default false = cloud / standalone; LAN só em Avançado.
+  static func useLanAPI() -> Bool {
+    if CompanionAppGroup.defaults.object(forKey: CompanionAppGroup.useLanAPIKey) != nil {
+      return CompanionAppGroup.defaults.bool(forKey: CompanionAppGroup.useLanAPIKey)
+    }
+    return UserDefaults.standard.bool(forKey: CompanionAppGroup.useLanAPIKey)
+  }
+
+  static func setUseLanAPI(_ value: Bool) {
+    CompanionAppGroup.defaults.set(value, forKey: CompanionAppGroup.useLanAPIKey)
+    UserDefaults.standard.set(value, forKey: CompanionAppGroup.useLanAPIKey)
+  }
+
+  static func saveCloudApiBase(_ base: String) {
+    CompanionAppGroup.defaults.set(base, forKey: CompanionAppGroup.cloudApiBaseKey)
+    UserDefaults.standard.set(base, forKey: CompanionAppGroup.cloudApiBaseKey)
+  }
+
+  static func savedCloudApiBase() -> String? {
+    if let s = CompanionAppGroup.defaults.string(forKey: CompanionAppGroup.cloudApiBaseKey), !s.isEmpty {
+      return s
+    }
+    return UserDefaults.standard.string(forKey: CompanionAppGroup.cloudApiBaseKey)
   }
 }
 

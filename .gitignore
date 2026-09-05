@@ -5,6 +5,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Workspaces: um único lockfile na raiz (evita npm install em loop)
+apps/desktop/package-lock.json
+
 # Environment & secrets — NEVER commit real keys
 .env
 .env.*
@@ -58,3 +61,5 @@ coverage/
 # Xcode
 **/xcuserdata/
 **/*.xcuserstate
+.derivedData/
+apps/ios/Companion/Generated/

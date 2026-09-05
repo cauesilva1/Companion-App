@@ -37,6 +37,7 @@ const INTERACTION_EFFECTS: Record<
   FEED: { affection: 0, energy: 8 },
   PLAY: { affection: 6, energy: -4 },
   CHAT: { affection: 4, energy: -2 },
+  TEASE: { affection: 5, energy: -2 },
   IGNORE_CHECK: { affection: -4, energy: -2 },
 };
 

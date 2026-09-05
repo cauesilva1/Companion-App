@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum Mood {
@@ -22,51 +23,78 @@ enum InteractionType {
   FEED
   CHAT
   PLAY
-  IGNORE_CHECK // gerado pelo sistema quando o usuario some por muito tempo
+  TEASE
+  IGNORE_CHECK
 }
 
-model User {
-  id         String      @id @default(cuid())
-  email      String      @unique
-  createdAt  DateTime    @default(now())
-  companions Companion[]
+enum MissionKind {
+  POKE_COUNT
+  FEED_COUNT
+  PLAY_COUNT
+  CHAT_COUNT
+  TEASE_COUNT
+  OPEN_APP
 }
 
+/// Mirror of auth.users for display (optional).
+model Profile {
+  id        String   @id
+  email     String   @unique
+  createdAt DateTime @default(now())
+}
+
+/// userId = auth.uid()::text (Supabase Auth). Sem FK Prisma → auth.users.
 model Companion {
-  id           String        @id @default(cuid())
-  userId       String
-  user         User          @relation(fields: [userId], references: [id])
-  name         String
-  personality  String        // ex: "curioso", "preguicoso", "carinhoso" - usado no prompt da IA
-  skin         String        @default("default") // qual "ooi"/skin visual esta usando
-
-  mood         Mood          @default(CONTENT)
-  energy       Int           @default(80) // 0-100
-  affection    Int           @default(0)  // 0-100, sobe com boas interacoes
-
-  lastDecayAt  DateTime      @default(now()) // ultima vez que aplicamos decay de tempo
-  lastInteractionAt DateTime @default(now())
-
-  createdAt    DateTime      @default(now())
-  interactions Interaction[]
+  id                String        @id @default(cuid())
+  userId            String
+  name              String
+  personality       String
+  skin              String        @default("dino-mort")
+  artStyle          String        @default("pixel")
+  backdrop          String        @default("sky")
+  archetype         String        @default("curioso")
+  mood              Mood          @default(CONTENT)
+  energy            Int           @default(80)
+  affection         Int           @default(55)
+  lastDecayAt       DateTime      @default(now())
+  lastInteractionAt DateTime      @default(now())
+  pendingAlert      String?
+  memoryNotes       String[]      @default([])
+  createdAt         DateTime      @default(now())
+  interactions      Interaction[]
 
   @@index([userId])
 }
 
 model Interaction {
-  id            String          @id @default(cuid())
-  companionId   String
-  companion     Companion       @relation(fields: [companionId], references: [id])
-
-  type          InteractionType
-  userMessage   String?         // so preenchido em CHAT
-  reactionText  String          // o que o companion "respondeu"
-
-  moodAfter     Mood
-  energyAfter   Int
+  id             String          @id @default(cuid())
+  companionId    String
+  companion      Companion       @relation(fields: [companionId], references: [id], onDelete: Cascade)
+  type           InteractionType
+  userMessage    String?
+  reactionText   String
+  moodAfter      Mood
+  energyAfter    Int
   affectionAfter Int
-
-  createdAt     DateTime        @default(now())
+  createdAt      DateTime        @default(now())
 
   @@index([companionId, createdAt])
+}
+
+model UserMissionProgress {
+  id              String      @id @default(cuid())
+  userId          String
+  dayKey          String
+  kind            MissionKind
+  title           String
+  description     String
+  target          Int
+  progress        Int         @default(0)
+  rewardEnergy    Int         @default(8)
+  rewardAffection Int         @default(5)
+  claimed         Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+
+  @@unique([userId, dayKey, kind])
+  @@index([userId, dayKey])
 }

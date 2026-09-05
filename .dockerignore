@@ -1,0 +1,10 @@
+node_modules
+apps
+docs
+data
+.git
+.env
+*.md
+apps/desktop/release
+apps/desktop/resources
+.cursor

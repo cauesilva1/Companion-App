@@ -20,6 +20,9 @@ import { spawn, ChildProcess } from "child_process";
 import { findSkin, isValidSkinId, listSkins, normalizeSkinId, SkinView } from "./skinCatalog";
 import { getNowPlaying, mediaCommand } from "./mediaMac";
 import { getFrontScreenContext, isSensitiveApp } from "./screenContext";
+import * as supabaseCloud from "./supabaseCloud";
+import * as missionCatalog from "./missionCatalog";
+import type { LocalMission } from "./missionCatalog";
 
 const isPackaged = app.isPackaged;
 if (isPackaged) {
@@ -48,7 +51,13 @@ const API_URL = (process.env.API_URL ?? "http://127.0.0.1:3333").replace(
   "://localhost",
   "://127.0.0.1"
 );
+const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").trim();
+const SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY ?? "").trim();
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+  supabaseCloud.configureSupabase(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
 console.log("[desktop] API_URL =", API_URL);
+if (SUPABASE_URL) console.log("[desktop] SUPABASE_URL =", SUPABASE_URL);
 
 const SESSION_PATH = isPackaged
   ? path.join(app.getPath("userData"), "session.json")
@@ -76,12 +85,17 @@ interface SessionData {
   streakCount?: number;
   lastVisitDay?: string; // YYYY-MM-DD
   missionsDay?: string;
-  missionsDone?: string[]; // play|chat|music
+  missionsDone?: string[]; // legado play|chat|music
+  missions?: LocalMission[];
+  authToken?: string;
+  authEmail?: string;
 }
 
 let companionId = "";
 let currentSkinId = "dino-doux";
 let lastAlert = "";
+let authToken = process.env.AUTH_TOKEN?.trim() || "";
+let authEmail = process.env.AUTH_EMAIL?.trim() || "";
 let mainWindow: BrowserWindow | null = null;
 let toastWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -105,7 +119,7 @@ let screenVision = false;
 let streakCount = 0;
 let lastVisitDay = "";
 let missionsDay = "";
-let missionsDone: string[] = [];
+let missionsList: LocalMission[] = [];
 let lastScreenHint = "";
 let lastScreenApp = "";
 let lastScreenKind: string | undefined;
@@ -291,7 +305,13 @@ function loadSession() {
       streakCount = typeof data.streakCount === "number" ? data.streakCount : 0;
       lastVisitDay = typeof data.lastVisitDay === "string" ? data.lastVisitDay : "";
       missionsDay = typeof data.missionsDay === "string" ? data.missionsDay : "";
-      missionsDone = Array.isArray(data.missionsDone) ? data.missionsDone.map(String) : [];
+      if (Array.isArray(data.missions) && data.missions.length > 0) {
+        missionsList = data.missions as LocalMission[];
+      } else {
+        missionsList = [];
+      }
+      if (typeof data.authToken === "string" && data.authToken) authToken = data.authToken;
+      if (typeof data.authEmail === "string") authEmail = data.authEmail;
       if (data.skinId && isValidSkinId(data.skinId)) currentSkinId = normalizeSkinId(data.skinId);
       savedX = typeof data.x === "number" ? data.x : undefined;
       savedY = typeof data.y === "number" ? data.y : undefined;
@@ -322,7 +342,9 @@ function saveSession() {
     streakCount,
     lastVisitDay,
     missionsDay,
-    missionsDone,
+    missions: missionsList,
+    authToken: authToken || undefined,
+    authEmail: authEmail || undefined,
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
     const [x, y] = mainWindow.getPosition();
@@ -346,13 +368,15 @@ function fetchJSON<T>(
     const parsed = new url.URL(fullUrl);
     const isHttps = parsed.protocol === "https:";
     const transport = isHttps ? https : http;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
     const req = transport.request(
       {
       hostname: parsed.hostname,
       port: parsed.port || (isHttps ? 443 : 80),
       path: parsed.pathname + parsed.search,
       method: options.method ?? "GET",
-      headers: { "Content-Type": "application/json" },
+      headers,
       },
       (res) => {
       let data = "";
@@ -419,9 +443,13 @@ function settingsPayload() {
     commentMedia,
     screenVision,
     streakCount,
-    missions: { day: missionsDay, done: missionsDone },
+    missions: { day: missionsDay, items: missionsList },
     screenHint: lastScreenHint,
     screenApp: lastScreenApp,
+    authEmail: authEmail || "",
+    loggedIn: !!authToken || !!supabaseCloud.getSession(),
+    apiUrl: API_URL,
+    supabaseConfigured: !!(SUPABASE_URL && SUPABASE_ANON_KEY),
   };
 }
 
@@ -430,7 +458,7 @@ function emitSettings() {
   emitMode();
 }
 
-function ensureDailyProgress() {
+function ensureDailyProgress(opts?: { openApp?: boolean }) {
   const day = todayKey();
   if (lastVisitDay !== day) {
     if (lastVisitDay) {
@@ -443,20 +471,48 @@ function ensureDailyProgress() {
     }
     lastVisitDay = day;
   }
-  if (missionsDay !== day) {
-    missionsDay = day;
-    missionsDone = [];
+  const ensured = missionCatalog.ensureToday(day, missionsDay, missionsList);
+  missionsDay = ensured.day;
+  missionsList = ensured.missions;
+  if (opts?.openApp) {
+    missionsList = missionCatalog.bump(missionsList, "OPEN_APP");
   }
   saveSession();
+  if (opts?.openApp) void flushMissionsToCloud();
 }
 
-function markMission(id: "play" | "chat" | "music") {
-  ensureDailyProgress();
-  if (!missionsDone.includes(id)) {
-    missionsDone = [...missionsDone, id];
-    saveSession();
-    emitSettings();
+async function flushMissionsToCloud() {
+  if (!supabaseCloud.getSession()) return;
+  try {
+    const remote = await supabaseCloud.syncMissions(missionsList, missionsDay || missionCatalog.dayKey());
+    if (remote.length > 0) {
+      missionsList = remote.map((r) => ({
+        id: r.id,
+        kind: r.kind as LocalMission["kind"],
+        title: r.title,
+        description: r.description,
+        target: r.target,
+        progress: r.progress,
+        rewardEnergy: r.rewardEnergy,
+        rewardAffection: r.rewardAffection,
+        claimed: r.claimed,
+      }));
+      saveSession();
+      emitSettings();
+    }
+  } catch {
+    /* offline */
   }
+}
+
+function bumpMissionFromInteraction(type: string) {
+  ensureDailyProgress();
+  const kind = missionCatalog.kindFromInteraction(type);
+  if (!kind) return;
+  missionsList = missionCatalog.bump(missionsList, kind);
+  saveSession();
+  emitSettings();
+  void flushMissionsToCloud();
 }
 
 function timeOfDay(): string {
@@ -528,7 +584,6 @@ async function refreshNowPlaying() {
       listeningMusic = true;
       lastTrackTitle = [info.title, info.artist].filter(Boolean).join(" — ");
       if (lastTrackTitle && lastTrackTitle !== prev) {
-        markMission("music");
         const short = info.title || lastTrackTitle;
         mainWindow?.webContents.send(
           "companion:localLine",
@@ -1329,8 +1384,116 @@ ipcMain.handle("companion:touchActivity", (_e, kind?: string) => {
 
 ipcMain.handle("companion:getPresence", () => presencePayload());
 
+ipcMain.handle("companion:login", async (_e, email: string, password: string) => {
+  try {
+    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+      const s = await supabaseCloud.signIn(email, password);
+      authEmail = s?.user?.email ?? email;
+      authToken = s?.access_token ?? "supabase";
+      saveSession();
+      try {
+        const me = await supabaseCloud.fetchMyCompanion();
+        if (me) {
+          companionId = me.id;
+          companionName = me.name;
+          if (me.skin && isValidSkinId(me.skin)) {
+            currentSkinId = normalizeSkinId(me.skin);
+            companionImageCache.clear();
+            applySkinToWindow();
+          }
+          quizMode = false;
+          saveSession();
+          rebuildTray();
+        }
+      } catch {
+        /* sem pet */
+      }
+      emitSettings();
+      return { ok: true, email: authEmail, companionId };
+    }
+    const data = (await fetchJSON("/auth/login", {
+      method: "POST",
+      body: { email, password },
+    })) as { token: string; user: { email: string } };
+    authToken = data.token;
+    authEmail = data.user.email;
+    saveSession();
+    emitSettings();
+    return { ok: true, email: authEmail, companionId };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("companion:register", async (_e, email: string, password: string) => {
+  try {
+    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+      const s = await supabaseCloud.signUp(email, password);
+      authEmail = s?.user?.email ?? email;
+      authToken = s?.access_token ?? "supabase";
+      saveSession();
+      emitSettings();
+      return { ok: true, email: authEmail };
+    }
+    const data = (await fetchJSON("/auth/register", {
+      method: "POST",
+      body: { email, password },
+    })) as { token: string; user: { email: string } };
+    authToken = data.token;
+    authEmail = data.user.email;
+    saveSession();
+    emitSettings();
+    return { ok: true, email: authEmail };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("companion:logout", async () => {
+  try {
+    await supabaseCloud.signOut();
+  } catch {
+    /* ignore */
+  }
+  authToken = "";
+  authEmail = "";
+  saveSession();
+  emitSettings();
+  return { ok: true };
+});
+
 ipcMain.handle("companion:createCompanion", async (_e, body: object) => {
   try {
+    const b = body as {
+      name?: string;
+      personality?: string;
+      skin?: string;
+      archetype?: string;
+    };
+    if (supabaseCloud.getSession()) {
+      const data = await supabaseCloud.upsertCompanion({
+        name: b.name ?? "companion",
+        personality: b.personality ?? b.archetype ?? "curioso",
+        skin: b.skin ?? "dino-mort",
+        archetype: b.archetype ?? "curioso",
+      });
+      companionId = data.id;
+      if (data.name) companionName = data.name;
+      if (data.skin && isValidSkinId(data.skin)) {
+        currentSkinId = normalizeSkinId(data.skin);
+        companionImageCache.clear();
+        applySkinToWindow();
+      }
+      quizMode = false;
+      compact = false;
+      habitatMode = false;
+      touchUserActivity();
+      ensureDailyProgress();
+      saveSession();
+      rebuildTray();
+      placeWindow();
+      return { ok: true, data };
+    }
     const data = (await fetchJSON("/companion", { method: "POST", body })) as {
       id: string;
       skin?: string;
@@ -1358,10 +1521,37 @@ ipcMain.handle("companion:createCompanion", async (_e, body: object) => {
 });
 
 ipcMain.handle("companion:getState", async () => {
-  if (!companionId) return { ok: false, error: "NO_COMPANION" };
   try {
     ensureDailyProgress();
-    const data = (await fetchJSON(`/companion/${companionId}/state`)) as {
+    if (supabaseCloud.getSession()) {
+      const me = await supabaseCloud.fetchMyCompanion();
+      if (!me) return { ok: false, error: "NO_COMPANION" };
+      companionId = me.id;
+      companionName = me.name;
+      cachedAffection = me.affection;
+      cachedEnergy = me.energy;
+      return {
+        ok: true,
+        data: {
+          id: me.id,
+          name: me.name,
+          skin: me.skin,
+          archetype: me.archetype,
+          mood: me.mood,
+          energy: me.energy,
+          affection: me.affection,
+          moodText: `${me.name} está por aí`,
+        },
+      };
+    }
+    const endpoint = companionId
+      ? `/companion/${companionId}/state`
+      : authToken
+        ? `/companion/me`
+        : "";
+    if (!endpoint) return { ok: false, error: "NO_COMPANION" };
+    const data = (await fetchJSON(endpoint)) as {
+      id?: string;
       alert?: string;
       name?: string;
       skin?: string;
@@ -1371,12 +1561,10 @@ ipcMain.handle("companion:getState", async () => {
       affection?: number;
       energy?: number;
     };
+    if (data.id) companionId = data.id;
     if (typeof data.affection === "number") cachedAffection = data.affection;
     if (typeof data.energy === "number") cachedEnergy = data.energy;
     if (data.name) companionName = data.name;
-    if (data.skin && isValidSkinId(data.skin) && data.skin !== currentSkinId) {
-      // keep session skin preference; don't override collectible choice from API form
-    }
     if (data.alert && data.alert !== lastAlert) {
       lastAlert = data.alert;
       showCompanionNotification(data.name ?? companionName, data.alert);
@@ -1392,11 +1580,19 @@ ipcMain.handle("companion:getState", async () => {
 });
 
 ipcMain.handle("companion:interact", async (_e, type: string, message?: string) => {
+  if (!companionId && authToken) {
+    try {
+      const me = (await fetchJSON("/companion/me")) as { id: string };
+      companionId = me.id;
+      saveSession();
+    } catch {
+      return { ok: false, error: "NO_COMPANION" };
+    }
+  }
   if (!companionId) return { ok: false, error: "NO_COMPANION" };
   try {
     touchUserActivity(type);
-    if (type === "PLAY") markMission("play");
-    if (type === "CHAT") markMission("chat");
+    bumpMissionFromInteraction(type);
     const body: Record<string, unknown> = {
       type,
       pranksEnabled,
@@ -1416,6 +1612,17 @@ ipcMain.handle("companion:interact", async (_e, type: string, message?: string) 
     if (typeof data.companion?.affection === "number") cachedAffection = data.companion.affection;
     if (typeof data.companion?.energy === "number") cachedEnergy = data.companion.energy;
     if (data.prank) void runPrank(data.prank);
+    if (supabaseCloud.getSession() && companionId) {
+      void supabaseCloud
+        .pushCompanionState({
+          id: companionId,
+          name: companionName,
+          energy: cachedEnergy,
+          affection: cachedAffection,
+        })
+        .catch(() => undefined);
+      void flushMissionsToCloud();
+    }
     return { ok: true, data };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -1637,7 +1844,7 @@ app.whenReady().then(async () => {
     );
   }
   loadSession();
-  ensureDailyProgress();
+  ensureDailyProgress({ openApp: true });
   await refreshBattery();
   await refreshNowPlaying();
   createWindow();

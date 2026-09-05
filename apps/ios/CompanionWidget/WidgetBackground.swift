@@ -1,13 +1,34 @@
 import SwiftUI
 
+private struct SkyWidgetFill: View {
+  let sky: SkyPeriod
+
+  var body: some View {
+    ZStack {
+      sky.gradient
+      Image(sky.imageName)
+        .resizable()
+        .scaledToFill()
+        .opacity(0.55)
+    }
+  }
+}
+
 extension View {
-  /// Compat iOS 16 widget + iOS 17 containerBackground.
+  /// Fundo de céu por hora do dia (widgets).
   @ViewBuilder
-  func companionWidgetBackground() -> some View {
+  func companionMockupWidgetBackground() -> some View {
+    companionWidgetBackground(sky: .current())
+  }
+
+  @ViewBuilder
+  func companionWidgetBackground(sky: SkyPeriod = .current()) -> some View {
     if #available(iOSApplicationExtension 17.0, *) {
-      self.containerBackground(.fill.tertiary, for: .widget)
+      self.containerBackground(for: .widget) {
+        SkyWidgetFill(sky: sky)
+      }
     } else {
-      self.background(Color(.secondarySystemBackground))
+      self.background(SkyWidgetFill(sky: sky))
     }
   }
 }

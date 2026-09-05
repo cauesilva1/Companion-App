@@ -5,55 +5,101 @@ import SwiftUI
 struct CompanionLiveActivityWidget: Widget {
   var body: some WidgetConfiguration {
     ActivityConfiguration(for: CompanionAttributes.self) { context in
-      // Banner / lock — só o dino correndo → dano → some
-      IslandRunThenHurtView(
-        skin: context.attributes.skin,
-        startedAt: context.attributes.startedAt,
-        size: 48
-      )
-      .frame(maxWidth: .infinity)
+      VStack(spacing: 6) {
+        IslandRunThenHurtView(
+          skin: context.attributes.skin,
+          progress: context.state.runProgress,
+          phase: context.state.islandPhase,
+          size: 48,
+          segment: .full
+        )
+        .frame(maxWidth: .infinity)
+        if !context.state.line.isEmpty {
+          Text(context.state.line)
+            .font(.caption.weight(.semibold))
+            .lineLimit(2)
+            .foregroundStyle(.primary)
+        }
+        HStack {
+          Text("⚡\(context.state.energy)%")
+            .font(.caption2.monospacedDigit())
+          if !context.state.track.isEmpty {
+            Text("♪ \(context.state.track)")
+              .font(.caption2)
+              .lineLimit(1)
+          }
+        }
+        .foregroundStyle(.secondary)
+      }
       .padding(.vertical, 10)
       .padding(.horizontal, 14)
-      .activityBackgroundTint(Color.cyan.opacity(0.2))
+      .activityBackgroundTint(Color.cyan.opacity(0.15))
       .activitySystemActionForegroundColor(.primary)
     } dynamicIsland: { context in
-      DynamicIsland {
-        DynamicIslandExpandedRegion(.leading) {
-          EmptyView()
-        }
+      let progress = context.state.runProgress
+      let phase = context.state.islandPhase
+      let skin = context.attributes.skin
+
+      return DynamicIsland {
+        DynamicIslandExpandedRegion(.leading) { EmptyView() }
         DynamicIslandExpandedRegion(.trailing) {
-          EmptyView()
+          Text("⚡\(context.state.energy)")
+            .font(.caption2.monospacedDigit().weight(.bold))
         }
         DynamicIslandExpandedRegion(.center) {
-          EmptyView()
+          if !context.state.track.isEmpty {
+            Text(context.state.track)
+              .font(.caption2)
+              .lineLimit(1)
+          } else {
+            Color.clear.frame(height: 4)
+          }
         }
         DynamicIslandExpandedRegion(.bottom) {
-          IslandRunThenHurtView(
-            skin: context.attributes.skin,
-            startedAt: context.attributes.startedAt,
-            size: 40
-          )
-          .frame(maxWidth: .infinity)
-          .padding(.horizontal, 4)
+          VStack(spacing: 4) {
+            IslandRunThenHurtView(
+              skin: skin,
+              progress: progress,
+              phase: phase,
+              size: 44,
+              segment: .full
+            )
+            .frame(maxWidth: .infinity)
+            if !context.state.line.isEmpty {
+              Text(context.state.line)
+                .font(.caption2)
+                .lineLimit(1)
+            }
+          }
+          .padding(.horizontal, 6)
+          .padding(.bottom, 4)
         }
       } compactLeading: {
         IslandRunThenHurtView(
-          skin: context.attributes.skin,
-          startedAt: context.attributes.startedAt,
-          size: 18
+          skin: skin,
+          progress: progress,
+          phase: phase,
+          size: 18,
+          segment: .firstHalf
         )
-        .frame(width: 52, height: 22)
+        .frame(width: 56, height: 22)
       } compactTrailing: {
-        // Sem bateria / energia — espaço vazio
-        EmptyView()
+        IslandRunThenHurtView(
+          skin: skin,
+          progress: progress,
+          phase: phase,
+          size: 18,
+          segment: .secondHalf
+        )
+        .frame(width: 56, height: 22)
       } minimal: {
-        DinoAvatar(skin: context.attributes.skin, size: 16)
-          .opacity(islandStillVisible(startedAt: context.attributes.startedAt) ? 1 : 0)
+        if phase != .done {
+          DinoStaticFrame(skin: skin, size: 16)
+            .opacity(phase == .fade ? 0.4 : 1)
+        } else {
+          EmptyView()
+        }
       }
     }
-  }
-
-  private func islandStillVisible(startedAt: Date) -> Bool {
-    Date().timeIntervalSince(startedAt) < IslandTiming.total
   }
 }

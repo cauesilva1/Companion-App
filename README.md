@@ -65,7 +65,10 @@ Design: widget arredondado, dino à esquerda no céu, painel de ações à direi
 
 ```
 companion-backend/
-├── src/                 # API Express (cérebro)
+├── src/                 # API Express (mock local / LEGACY)
+├── apps/desktop/        # Electron + sync Supabase
+├── apps/ios/            # SwiftUI → Supabase direto
+
 ├── prisma/              # schema (opcional; mock sem DB)
 ├── apps/desktop/        # popup Electron
 │   ├── electron/        # main / preload / Spotify
@@ -85,9 +88,11 @@ companion-backend/
 ```bash
 git clone https://github.com/cauesilva1/Companion-App.git
 cd Companion-App
-npm install
+npm install          # SEMPRE na raiz — nunca dentro de apps/desktop
 cp .env.example .env
 ```
+
+> Workspaces npm: existe **um** `package-lock.json` na raiz. Instalar de novo em `apps/desktop` baixa o Electron outra vez e pode parecer “loop de dependências” no Cursor.
 
 Edite o `.env` com suas chaves (nunca commite esse arquivo):
 
@@ -96,15 +101,34 @@ Edite o `.env` com suas chaves (nunca commite esse arquivo):
 | `NVIDIA_API_KEY` | [build.nvidia.com](https://build.nvidia.com) |
 | `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) |
 | `HUGGINGFACE_API_KEY` | opcional |
-| `DATABASE_URL` | deixe vazio para modo mock (JSON local) |
+| `DATABASE_URL` + `DIRECT_URL` | Supabase Postgres (migrations) |
+| `SUPABASE_URL` + `SUPABASE_ANON_KEY` | Sync direto nos clients (Auth + REST) |
 
-No desktop, se precisar:
+**Sem banco:** Express em mock JSON local.
+
+**Sync PC ↔ iPhone:** configure Supabase nos clients (não precisa hospedar Express).
+No desktop:
 
 ```bash
 cp apps/desktop/.env.example apps/desktop/.env
-# API_URL=http://127.0.0.1:3333
+# SUPABASE_URL=https://xxxx.supabase.co
+# SUPABASE_ANON_KEY=eyJ...
+# API_URL local só se quiser o mock Express embutido
 ```
 
+---
+
+## Cloud (sem Mac na LAN, sem Express hospedado)
+
+Fluxo: **Supabase Auth + Postgres** direto nos clients (como Next).
+
+1. No dashboard Supabase: Auth email/senha; rode `npx prisma migrate deploy` (RLS).
+2. `.env`: `SUPABASE_URL` + `SUPABASE_ANON_KEY`, depois `node scripts/sync-supabase-config.mjs`.
+3. iPhone / desktop: usuário só cria conta (email/senha).
+
+Express (`npm run dev`) continua só para mock local no Mac — **não** precisa Railway/Fly para sync.
+
+> Se a senha do banco vazou, troque no Supabase.
 ---
 
 ## Rodar
@@ -155,6 +179,8 @@ Isso:
 3. Na primeira abertura: clique com o botão direito → **Abrir** (app sem assinatura Apple)
 4. Dados locais ficam em `~/Library/Application Support/Companion/`
 
+Para sync com o iPhone: mesma conta Supabase (`SUPABASE_URL` + anon key no `.env` do desktop e na Config do iOS). **Sem** API Express na nuvem.
+
 Só a pasta do app (sem DMG):
 
 ```bash
@@ -167,17 +193,19 @@ npm run pack --workspace=companion-desktop
 
 ## iOS (SwiftUI)
 
-App nativo com **widget**, **tela de bloqueio** e **Dynamic Island** (Live Activities).  
+App nativo com **widget**, **tela de bloqueio** e **Dynamic Island**.  
 Código em [`apps/ios/`](apps/ios/) — detalhes em [`apps/ios/README.md`](apps/ios/README.md).
 
-**Requisitos:** Xcode 15+, iOS 16.2+, API local (`npm run dev:api`).
+**Modo padrão:** Supabase (conta email/senha) ou standalone local. **Não precisa de API Express na nuvem.**
+
+- Now Playing (título/artista), missões, pegadinhas, 60 Hz no app
+- LAN Mac só em **Config → Avançado**
+**Requisitos:** macOS Sequoia 15+, **Xcode 26.3** Universal, iOS 16.2+.
 
 ```bash
-./scripts/generate-ios-project.sh   # precisa do XcodeGen
+./scripts/generate-ios-project.sh
 open apps/ios/Companion.xcodeproj
 ```
-
-No app: informe o Companion ID (do desktop) se necessário; em device físico use o IP do Mac como API base (`http://192.168.x.x:3333`).
 
 ---
 
@@ -206,10 +234,19 @@ Perguntas de clima usam localização (IP) + Open-Meteo e citam temperatura real
 
 | Método | Rota | Uso |
 | --- | --- | --- |
-| `POST` | `/companion` | cria companion |
+| `POST` | `/auth/register` | cria conta email/senha → JWT |
+| `POST` | `/auth/login` | login → JWT |
+| `GET` | `/auth/me` | usuário autenticado |
+| `POST` | `/companion` | cria companion (Bearer) |
+| `GET` | `/companion/me` | pet da conta |
 | `GET` | `/companion/:id/state` | estado + humor |
-| `POST` | `/companion/:id/interact` | Play / Poke / Chat |
+| `POST` | `/companion/:id/interact` | Poke / Feed / Play / Chat / Tease |
 | `GET` | `/companion/:id/feed` | histórico |
+| `GET` | `/missions/today` | missões do dia |
+| `POST` | `/missions/:id/claim` | resgata recompensa |
+| `POST` | `/missions/open-app` | progresso “abrir app” |
+
+Com `DATABASE_URL` as rotas companion/missions exigem `Authorization: Bearer <token>`. Sem DB = mock local sem auth.
 
 ---
 
@@ -229,8 +266,39 @@ Ver [apps/desktop/ATTRIBUTION.md](apps/desktop/ATTRIBUTION.md):
 - Use só placeholders em `.env.example`
 - Sessão local e `data/` também ficam fora do git
 - `apps/desktop/resources/` e `apps/desktop/release/` (bundle/DMG) também ficam fora do git
+- API escuta em `127.0.0.1` por padrão (`HOST=0.0.0.0` no Docker / LAN)
+- Body JSON limitado a 32kb; `POST .../interact` tem rate limit básico
+- Auth: email + senha (bcrypt) + JWT — sem Sign in with Apple/Google neste ciclo
 
-Se uma chave vazou em algum momento, **revogue e gere outra** no provedor.
+Se uma chave ou senha do banco vazou, **revogue e gere outra**.
+
+---
+
+## Cursor / Windows: CPU alta ao abrir o repo
+
+Sintoma típico: Cursor em 100% CPU e mensagem de “instalação de dependências em loop”.
+
+Causas comuns neste monorepo:
+
+1. **`npm install` na pasta errada** (`apps/desktop` além da raiz) → segundo download do Electron (~250MB+)
+2. **Indexação** de `node_modules`, `release/`, `resources/` (centenas de MB / dezenas de milhares de arquivos)
+3. Extensões órfãs do próprio Cursor (não é bug do repo) — limpar pasta de extensions ajuda
+
+Mitigações já no repo:
+
+- `.cursorignore` — Cursor não deve indexar builds/deps
+- `.npmrc` + lockfile só na raiz
+- `apps/desktop/package-lock.json` removido / ignorado
+
+Para o amigo no Windows:
+
+```bash
+# na raiz do clone
+rm -rf node_modules apps/desktop/node_modules
+npm install
+```
+
+No Cursor: Settings → desativar auto-run de tasks se houver; não abrir a pasta `apps/desktop/release` como workspace.
 
 ---
 

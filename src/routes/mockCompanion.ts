@@ -220,7 +220,7 @@ mockRouter.get("/:id/status", (req, res) => {
 });
 
 const interactSchema = z.object({
-  type: z.enum(["POKE", "FEED", "PLAY", "CHAT", "IGNORE_CHECK"]),
+  type: z.enum(["POKE", "FEED", "PLAY", "CHAT", "TEASE", "IGNORE_CHECK"]),
   message: z.string().max(500).optional(),
   pranksEnabled: z.boolean().optional(),
   rememberChats: z.boolean().optional(),

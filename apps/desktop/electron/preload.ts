@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld("companion", {
     ipcRenderer.invoke("companion:interact", type, message),
   getFeed: (limit?: number) => ipcRenderer.invoke("companion:getFeed", limit),
   createCompanion: (body: object) => ipcRenderer.invoke("companion:createCompanion", body),
+  login: (email: string, password: string) =>
+    ipcRenderer.invoke("companion:login", email, password),
+  register: (email: string, password: string) =>
+    ipcRenderer.invoke("companion:register", email, password),
+  logout: () => ipcRenderer.invoke("companion:logout"),
   getSession: () => ipcRenderer.invoke("companion:getSession"),
   getSettings: () => ipcRenderer.invoke("companion:getSettings"),
   setSettings: (patch: object) => ipcRenderer.invoke("companion:setSettings", patch),

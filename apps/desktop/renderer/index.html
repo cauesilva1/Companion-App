@@ -169,6 +169,19 @@
         <div class="settings-body">
           <div class="settings-grid">
             <section class="settings-card">
+              <h3>Conta</h3>
+              <p class="settings-hint" id="cfgAuthStatus">Desconectado</p>
+              <label class="settings-row"><span>Email</span><input type="email" id="cfgAuthEmail" placeholder="voce@email.com" /></label>
+              <label class="settings-row"><span>Senha</span><input type="password" id="cfgAuthPassword" placeholder="mín. 6" /></label>
+              <div class="settings-actions">
+                <button type="button" class="settings-btn" id="cfgAuthLogin">Entrar</button>
+                <button type="button" class="settings-btn" id="cfgAuthRegister">Criar</button>
+                <button type="button" class="settings-btn" id="cfgAuthLogout">Sair</button>
+              </div>
+              <p class="settings-hint">Mesmo email no iPhone. URL/anon vêm do <code>.env</code> — o usuário só entra na conta.</p>
+            </section>
+
+            <section class="settings-card">
               <h3>Geral</h3>
               <label class="settings-row"><span>Mutar sons</span><input type="checkbox" id="cfgSoundMuted" class="toggle" /></label>
               <label class="settings-row"><span>Pegadinhas</span><input type="checkbox" id="cfgPranks" class="toggle" /></label>

@@ -174,6 +174,15 @@ export function localReaction(params: LocalVoiceParams): string {
 
   if (type === "PLAY") return pick(PLAY[arch]);
   if (type === "POKE") return pick(POKE[arch]);
+  if (type === "TEASE") {
+    return pick({
+      curioso: ["Por que o ovo foi pro psicólogo? Estava rachado por dentro."],
+      preguicoso: ["Minha piada favorita é… dormir. Ponto final."],
+      carinhoso: ["Você é minha punchline favorita."],
+      zoeiro: ["Qual o dino mais chato? O Compsógnato-te-liguei."],
+      misterioso: ["O silêncio também é uma piada. Você que não ri."],
+    }[arch]);
+  }
 
   return pick(GENERIC[mood]);
 }
