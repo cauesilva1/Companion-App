@@ -16,6 +16,10 @@ struct StoredCompanion: Codable, Equatable, Sendable {
   var pendingAlert: String?
   var memoryNotes: [String]
   var userDisplayName: String?
+  var growthStage: String?
+  var createdAt: Date?
+  /// When current growthStage started (dwell clock).
+  var growthStageAt: Date?
 
   func toSnapshot(moodText: String? = nil) -> CompanionSnapshot {
     CompanionSnapshot(
@@ -27,7 +31,9 @@ struct StoredCompanion: Codable, Equatable, Sendable {
       affection: affection,
       skin: skin,
       archetype: archetype,
-      updatedAt: Date()
+      updatedAt: Date(),
+      growthStage: Growth.normalize(growthStage).rawValue,
+      createdAt: createdAt ?? lastInteractionAt
     )
   }
 }
@@ -114,7 +120,10 @@ enum CompanionLocalStore {
       lastInteractionAt: now,
       pendingAlert: nil,
       memoryNotes: [],
-      userDisplayName: nil
+      userDisplayName: nil,
+      growthStage: "baby",
+      createdAt: now,
+      growthStageAt: now
     )
   }
 }

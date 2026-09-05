@@ -42,7 +42,10 @@ enum SyncQueue {
         case "push_missions":
           struct Box: Codable { var dayKey: String; var missions: [LocalMission] }
           let box = try JSONDecoder().decode(Box.self, from: item.payload)
-          _ = try await SupabaseClient.shared.syncMissions(box.missions, dayKey: box.dayKey)
+          let synced = try await SupabaseClient.shared.syncMissions(box.missions, dayKey: box.dayKey)
+          if box.dayKey == MissionCatalog.dayKey() {
+            MissionCatalog.replaceToday(synced)
+          }
         default:
           break
         }

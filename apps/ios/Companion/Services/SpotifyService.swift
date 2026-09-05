@@ -43,6 +43,13 @@ final class SpotifyService: NSObject, ObservableObject {
     var isPlaying: Bool
   }
 
+  /// 200 com item = `.track`; 204 / sem item = `.idle` (nada tocando).
+  enum Playback: Equatable {
+    case track(Track)
+    case idle
+    case unavailable
+  }
+
   func connect() async throws {
     lastError = nil
     guard hasClientId else {
@@ -103,32 +110,34 @@ final class SpotifyService: NSObject, ObservableObject {
     isConnected = false
   }
 
-  func currentlyPlaying() async -> Track? {
-    guard let token = await validAccessToken() else { return nil }
+  func currentlyPlaying() async -> Playback {
+    guard let token = await validAccessToken() else { return .unavailable }
     var req = URLRequest(url: URL(string: "https://api.spotify.com/v1/me/player/currently-playing")!)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     do {
       let (data, resp) = try await URLSession.shared.data(for: req)
-      guard let http = resp as? HTTPURLResponse else { return nil }
-      if http.statusCode == 204 { return nil }
+      guard let http = resp as? HTTPURLResponse else { return .unavailable }
+      if http.statusCode == 204 { return .idle }
       if http.statusCode == 401 {
         if let refreshed = await refreshAccessToken() {
           req.setValue("Bearer \(refreshed)", forHTTPHeaderField: "Authorization")
           let (data2, resp2) = try await URLSession.shared.data(for: req)
-          guard let http2 = resp2 as? HTTPURLResponse, http2.statusCode == 200 else {
-            if (resp2 as? HTTPURLResponse)?.statusCode == 401 { disconnect() }
-            return nil
+          guard let http2 = resp2 as? HTTPURLResponse else { return .unavailable }
+          if http2.statusCode == 204 { return .idle }
+          guard http2.statusCode == 200 else {
+            if http2.statusCode == 401 { disconnect() }
+            return .unavailable
           }
-          return parseTrack(data2)
+          return parseTrack(data2).map { .track($0) } ?? .idle
         }
         disconnect()
-        return nil
+        return .unavailable
       }
-      guard http.statusCode == 200 else { return nil }
-      return parseTrack(data)
+      guard http.statusCode == 200 else { return .unavailable }
+      return parseTrack(data).map { .track($0) } ?? .idle
     } catch {
       lastError = error.localizedDescription
-      return nil
+      return .unavailable
     }
   }
 

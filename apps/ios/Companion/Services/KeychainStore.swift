@@ -12,6 +12,12 @@ enum KeychainStore {
     case spotifyAccess = "SPOTIFY_ACCESS"
     case spotifyRefresh = "SPOTIFY_REFRESH"
     case spotifyExpires = "SPOTIFY_EXPIRES"
+    case supabaseAccess = "SUPABASE_ACCESS"
+    case supabaseRefresh = "SUPABASE_REFRESH"
+    case supabaseExpires = "SUPABASE_EXPIRES"
+    case supabaseUserId = "SUPABASE_USER_ID"
+    case supabaseEmail = "SUPABASE_EMAIL"
+    case supabaseAnonymous = "SUPABASE_ANON_USER"
   }
 
   static func get(_ key: Key) -> String? {

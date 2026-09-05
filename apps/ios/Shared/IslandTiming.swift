@@ -29,7 +29,7 @@ enum IslandTiming {
     return u * u * (3 - 2 * u)
   }
 
-  /// Progresso 0…1 a partir de `startedAt` (Island continua mesmo se o app morrer).
+  /// Progresso 0…1 a partir de `startedAt` (widget anima com o relógio).
   static func progress(since startedAt: Date, now: Date = Date()) -> Double {
     let elapsed = now.timeIntervalSince(startedAt)
     guard total > 0 else { return 1 }

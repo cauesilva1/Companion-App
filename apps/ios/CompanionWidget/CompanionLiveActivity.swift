@@ -85,34 +85,41 @@ struct CompanionLiveActivityWidget: Widget {
         TimelineView(.periodic(from: startedAt, by: 1.0 / 30.0)) { timeline in
           let progress = IslandTiming.progress(since: startedAt, now: timeline.date)
           let phase = IslandTiming.phase(at: progress)
-          IslandRunThenHurtView(
-            skin: skin,
-            progress: progress,
-            phase: phase,
-            size: 18,
-            segment: .firstHalf
-          )
-          .frame(width: 56, height: 22)
+          if phase == .done || phase == .fade {
+            Color.clear.frame(width: 56, height: 22)
+          } else {
+            IslandRunThenHurtView(
+              skin: skin,
+              progress: progress,
+              phase: phase,
+              size: 18,
+              segment: .firstHalf
+            )
+            .frame(width: 56, height: 22)
+          }
         }
       } compactTrailing: {
         TimelineView(.periodic(from: startedAt, by: 1.0 / 30.0)) { timeline in
           let progress = IslandTiming.progress(since: startedAt, now: timeline.date)
           let phase = IslandTiming.phase(at: progress)
-          IslandRunThenHurtView(
-            skin: skin,
-            progress: progress,
-            phase: phase,
-            size: 18,
-            segment: .secondHalf
-          )
-          .frame(width: 56, height: 22)
+          if phase == .done || phase == .fade {
+            Color.clear.frame(width: 56, height: 22)
+          } else {
+            IslandRunThenHurtView(
+              skin: skin,
+              progress: progress,
+              phase: phase,
+              size: 18,
+              segment: .secondHalf
+            )
+            .frame(width: 56, height: 22)
+          }
         }
       } minimal: {
         TimelineView(.periodic(from: startedAt, by: 1.0 / 30.0)) { timeline in
           let phase = IslandTiming.phase(since: startedAt, now: timeline.date)
-          if phase != .done {
+          if phase == .run || phase == .hurt {
             DinoStaticFrame(skin: skin, size: 16)
-              .opacity(phase == .fade ? 0.4 : 1)
           } else {
             EmptyView()
           }

@@ -6,6 +6,13 @@ import {
   weatherContextLine,
   weatherSpokenLine,
 } from "./weather";
+import { effectiveGrowthStage, stageVoiceHint, stageWordLimit, type GrowthStage, GROWTH_ENABLED } from "./growth";
+import {
+  acceptReply,
+  isMusicTopic,
+  isMoodBurst,
+  isStaleAssistantNoise,
+} from "./speechFilters";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "openrouter/auto";
@@ -43,6 +50,7 @@ export interface ReactionParams {
     personality: string;
     archetype?: string;
     artStyle?: string;
+    growthStage?: string;
   };
   type: InteractionType;
   mood: Mood;
@@ -53,6 +61,8 @@ export interface ReactionParams {
   memoryNotes?: string[];
   screenHint?: string;
   weatherHint?: string;
+  musicHint?: string;
+  growthEnabled?: boolean;
 }
 
 interface ChatMessage {
@@ -107,19 +117,36 @@ function buildMessages(params: ReactionParams): ChatMessage[] {
     memoryNotes,
     screenHint,
     weatherHint,
+    musicHint,
+    growthEnabled = GROWTH_ENABLED,
   } = params;
   const arch = companion.archetype ?? "curioso";
   const tone = ARCH_TONE[arch] ?? ARCH_TONE.curioso;
+  const stage: GrowthStage = effectiveGrowthStage(companion.growthStage);
+  const maxWords = stageWordLimit(stage);
+  const msg = userMessage?.trim() ?? "";
 
   const systemParts = [
-    `Voce e ${companion.name}, companion virtual.`,
+    `Voce e ${companion.name}, companion virtual e amigo de verdade.`,
     `Personalidade: ${companion.personality}. Arquétipo: ${arch}.`,
     `Estilo visual (tom): ${companion.artStyle ?? "cartoon"}.`,
     `Humor agora: ${MOOD_LABELS[mood]}.`,
     tone,
-    `Responda em portugues do Brasil, primeira pessoa, no maximo 14 palavras.`,
-    `Apenas a fala. Sem aspas, sem ingles, sem explicar, sem repetir o pedido.`,
+    stageVoiceHint(stage),
+    `PRIORIDADE: a ultima mensagem do usuario. Responda ao assunto DELA.`,
+    `Se o usuario mudou de tema, abandone o assunto anterior (musica, rap, clima, etc).`,
+    `Nunca comece com grito vazio (Uhul, Uhuul, que alegria, modo foguete).`,
+    `Responda em portugues do Brasil, primeira pessoa, no maximo ${maxWords} palavras.`,
+    `Apenas a fala. Sem aspas, sem ingles, sem explicar raciocinio.`,
   ];
+  if (!growthEnabled) {
+    systemParts.push(
+      `Evolucao visual DESLIGADA: voce ainda e so a forma base. Nao diga que ja evoluiu, que cresce sozinho, nem que o usuario te evoluiu.`
+    );
+    systemParts.push(
+      `Se falarem de design/evolucao/arte: seja empatico; forma base ja esta ok; evolucoes visuais podem vir depois — sem inventar progresso.`
+    );
+  }
   if (memoryNotes?.length) {
     systemParts.push(`Memoria curta (use com naturalidade): ${memoryNotes.slice(0, 6).join("; ")}.`);
   }
@@ -128,14 +155,23 @@ function buildMessages(params: ReactionParams): ChatMessage[] {
   }
   if (weatherHint) {
     systemParts.push(weatherHint);
-    systemParts.push("Pode usar ate 18 palavras so nesta resposta de clima.");
+    systemParts.push(`Pode usar ate ${Math.max(maxWords, 18)} palavras so nesta resposta de clima.`);
+  }
+  if (musicHint && isMusicTopic(msg)) {
+    systemParts.push(`Usuario pode estar ouvindo: ${musicHint}. So comente se a mensagem atual for sobre musica.`);
   }
 
   const messages: ChatMessage[] = [{ role: "system", content: systemParts.join(" ") }];
-  for (const turn of history.slice(-5)) {
+  const cleanHistory = history
+    .filter((turn) => turn.role !== "assistant" || (!isMoodBurst(turn.content) && !isStaleAssistantNoise(turn.content)))
+    .slice(-4);
+  for (const turn of cleanHistory) {
     messages.push({ role: turn.role, content: turn.content });
   }
-  messages.push({ role: "user", content: userMessage?.trim() || "Oi" });
+  const payload = msg
+    ? `Mensagem atual (responda isto; ignore assunto antigo se mudou de tema): ${msg}`
+    : "Oi";
+  messages.push({ role: "user", content: payload });
   return messages;
 }
 
@@ -209,7 +245,8 @@ async function callChatAPI(
   apiKey: string,
   model: string,
   messages: ChatMessage[],
-  extraHeaders?: Record<string, string>
+  extraHeaders?: Record<string, string>,
+  gate?: { userMessage: string; growthEnabled: boolean }
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
@@ -225,7 +262,7 @@ async function callChatAPI(
         model,
         messages,
         max_tokens: MAX_TOKENS,
-        temperature: 0.85,
+        temperature: 0.65,
       }),
       signal: controller.signal,
     });
@@ -239,6 +276,12 @@ async function callChatAPI(
     if (!text) throw new Error("Resposta vazia da API");
     const clean = sanitizeReaction(text);
     if (!clean) throw new Error("Resposta da IA inválida (thinking/meta)");
+    if (
+      gate &&
+      !acceptReply(clean, gate.userMessage, { growthEnabled: gate.growthEnabled })
+    ) {
+      throw new Error("Resposta rejeitada pelos filtros de fala");
+    }
     return clean;
   } finally {
     clearTimeout(timer);
@@ -252,6 +295,7 @@ function toLocal(params: ReactionParams): string {
     mood: params.mood,
     type: params.type,
     userMessage: params.userMessage,
+    growthStage: params.companion.growthStage,
   };
   return localReaction(local);
 }
@@ -264,14 +308,26 @@ export async function generateReaction(
     return toLocal(params);
   }
 
+  const growthEnabled = params.growthEnabled ?? GROWTH_ENABLED;
   const msg = params.userMessage?.trim() ?? "";
   if (msg) {
     const key = cacheKey(companionId, msg);
     const hit = chatCache.get(key);
     if (hit && Date.now() - hit.at < CHAT_CACHE_MS) {
-      return hit.text;
+      if (acceptReply(hit.text, msg, { growthEnabled })) {
+        return hit.text;
+      }
+      chatCache.delete(key);
     }
   }
+
+  // Não injeta música no prompt se o user não falou de música.
+  if (params.musicHint && !isMusicTopic(msg)) {
+    params = { ...params, musicHint: undefined };
+  }
+  params = { ...params, growthEnabled };
+
+  const gate = { userMessage: msg, growthEnabled };
 
   // Clima/temperatura: dados reais da região (IP → Open-Meteo)
   if (msg && isWeatherQuestion(msg)) {
@@ -281,7 +337,6 @@ export async function generateReaction(
         ...params,
         weatherHint: weatherContextLine(snap),
       };
-      // Resposta garantida com número real (LLM pode colorir depois; se falhar, usa esta)
       const spoken = weatherSpokenLine(snap, params.companion.archetype ?? "curioso");
       const citesWeather = (text: string) => {
         const hasTemp = text.includes(String(snap.tempC));
@@ -298,11 +353,17 @@ export async function generateReaction(
         "HTTP-Referer": process.env.APP_URL ?? "http://localhost:3333",
         "X-Title": "Companion Engine",
       };
-      // Uma tentativa rápida de colorir; se falhar, fala local com °C real
       const nvidiaKey = process.env.NVIDIA_API_KEY;
       if (nvidiaKey) {
         try {
-          const text = await callChatAPI(NVIDIA_API_URL, nvidiaKey, NVIDIA_TRY_MODELS[0], messages);
+          const text = await callChatAPI(
+            NVIDIA_API_URL,
+            nvidiaKey,
+            NVIDIA_TRY_MODELS[0],
+            messages,
+            undefined,
+            gate
+          );
           if (citesWeather(text)) {
             if (msg) chatCache.set(cacheKey(companionId, msg), { text, at: Date.now() });
             return text;
@@ -319,7 +380,8 @@ export async function generateReaction(
               openrouterKey,
               OPENROUTER_MODEL,
               messages,
-              orHeaders
+              orHeaders,
+              gate
             );
             if (citesWeather(text)) {
               if (msg) chatCache.set(cacheKey(companionId, msg), { text, at: Date.now() });
@@ -347,7 +409,7 @@ export async function generateReaction(
   if (nvidiaKey) {
     for (const model of NVIDIA_TRY_MODELS) {
       try {
-        const text = await callChatAPI(NVIDIA_API_URL, nvidiaKey, model, messages);
+        const text = await callChatAPI(NVIDIA_API_URL, nvidiaKey, model, messages, undefined, gate);
         if (msg) chatCache.set(cacheKey(companionId, msg), { text, at: Date.now() });
         return text;
       } catch (err) {
@@ -364,7 +426,8 @@ export async function generateReaction(
         openrouterKey,
         OPENROUTER_MODEL,
         messages,
-        orHeaders
+        orHeaders,
+        gate
       );
       if (msg) chatCache.set(cacheKey(companionId, msg), { text, at: Date.now() });
       return text;

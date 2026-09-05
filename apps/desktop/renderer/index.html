@@ -176,15 +176,18 @@
               <div class="settings-actions">
                 <button type="button" class="settings-btn" id="cfgAuthLogin">Entrar</button>
                 <button type="button" class="settings-btn" id="cfgAuthRegister">Criar</button>
+                <button type="button" class="settings-btn" id="cfgAuthForgot">Esqueci a senha</button>
                 <button type="button" class="settings-btn" id="cfgAuthLogout">Sair</button>
               </div>
-              <p class="settings-hint">Mesmo email no iPhone. URL/anon vêm do <code>.env</code> — o usuário só entra na conta.</p>
+              <p class="settings-hint">Mesmo email no iPhone. Se não lembrar a senha, use “Esqueci a senha” e confira o email (e spam).</p>
             </section>
 
             <section class="settings-card">
               <h3>Geral</h3>
               <label class="settings-row"><span>Mutar sons</span><input type="checkbox" id="cfgSoundMuted" class="toggle" /></label>
               <label class="settings-row"><span>Pegadinhas</span><input type="checkbox" id="cfgPranks" class="toggle" /></label>
+              <label class="settings-row"><span>Evolução (beta)</span><input type="checkbox" id="cfgGrowthEnabled" class="toggle" /></label>
+              <p class="settings-hint" id="cfgGrowthHint">Desligado: só a forma base. Recomendado por enquanto.</p>
               <label class="settings-row"><span>Modo mínimo</span><input type="checkbox" id="cfgCompact" class="toggle" /></label>
               <label class="settings-row"><span>Música manual</span><input type="checkbox" id="cfgListeningMusic" class="toggle" /></label>
               <div class="settings-actions">
@@ -223,7 +226,7 @@
             </section>
 
             <section class="settings-card" id="missionsSection">
-              <h3>Hoje</h3>
+              <h3 id="missionsDayTitle">Hoje</h3>
               <p class="settings-hint" id="streakHint"></p>
               <ul class="missions-list" id="missionsList"></ul>
             </section>

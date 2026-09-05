@@ -4,19 +4,15 @@ import WidgetKit
 
 @MainActor
 enum LiveActivityController {
+  /// Inicia a corrida na Island. Animação no widget via `startedAt` (wall clock).
+  /// Já agenda dismiss — se o app morrer, a Island some sozinha e não fica travada.
   @discardableResult
-  static func start(snapshot: CompanionSnapshot, line: String? = nil) throws -> String {
+  static func start(snapshot: CompanionSnapshot, line: String? = nil) async throws -> String {
     guard ActivityAuthorizationInfo().areActivitiesEnabled else {
       throw LiveActivityError.disabled
     }
 
-    if let current = Activity<CompanionAttributes>.activities.first {
-      let elapsed = Date().timeIntervalSince(current.attributes.startedAt)
-      if elapsed < IslandTiming.total {
-        return current.id
-      }
-      Task { await endActivity(current) }
-    }
+    await endAll()
 
     let startedAt = Date()
     let attributes = CompanionAttributes(
@@ -30,8 +26,8 @@ enum LiveActivityController {
       line: line,
       track: track
     )
-    let stale = startedAt.addingTimeInterval(IslandTiming.total + 8.0)
-    let content = ActivityContent(state: state, staleDate: stale, relevanceScore: 100)
+    let dismissAt = startedAt.addingTimeInterval(IslandTiming.total + 0.75)
+    let content = ActivityContent(state: state, staleDate: dismissAt, relevanceScore: 100)
 
     let activity = try Activity.request(
       attributes: attributes,
@@ -39,29 +35,23 @@ enum LiveActivityController {
       pushType: nil
     )
 
-    let activityId = activity.id
-    let alertTitle = snapshot.name
-    let alertBody = line ?? track.nilIfEmpty ?? "Correndo na Island…"
-    let skin = snapshot.skin
-    let moodLine = line ?? snapshot.moodText
-    let energy = snapshot.energyPercent
+    let alert = AlertConfiguration(
+      title: LocalizedStringResource(stringLiteral: snapshot.name),
+      body: LocalizedStringResource(
+        stringLiteral: line ?? track.nilIfEmpty ?? "Correndo na Island…"
+      ),
+      sound: .default
+    )
+    await activity.update(
+      ActivityContent(state: state, staleDate: dismissAt, relevanceScore: 100),
+      alertConfiguration: alert
+    )
+
+    // Agenda o fim: permanece visível até dismissAt, depois some (mesmo com app morto).
+    await activity.end(content, dismissalPolicy: .after(dismissAt))
+
     Task { @MainActor in
-      let alert = AlertConfiguration(
-        title: LocalizedStringResource(stringLiteral: alertTitle),
-        body: LocalizedStringResource(stringLiteral: alertBody),
-        sound: .default
-      )
-      await activity.update(
-        ActivityContent(state: state, staleDate: stale, relevanceScore: 100),
-        alertConfiguration: alert
-      )
-      await animateIsland(
-        activityId: activityId,
-        skin: skin,
-        line: moodLine,
-        energy: energy,
-        track: track
-      )
+      await playIslandSounds(startedAt: startedAt)
     }
 
     return activity.id
@@ -80,51 +70,36 @@ enum LiveActivityController {
     }
   }
 
+  /// Encerra tudo na hora (voltar ao app / fechar app).
   static func endAll() async {
     for activity in Activity<CompanionAttributes>.activities {
-      await endActivity(activity)
+      let content = ActivityContent(state: activity.content.state, staleDate: nil)
+      await activity.end(content, dismissalPolicy: .immediate)
     }
   }
 
-  /// Encerra Islands órfãs (app foi morto no meio da animação).
+  /// Encerra Islands já expiradas (legado / órfãs).
   static func endExpired() async {
     for activity in Activity<CompanionAttributes>.activities {
       if IslandTiming.isExpired(startedAt: activity.attributes.startedAt) {
-        await endActivity(activity)
+        let content = ActivityContent(state: activity.content.state, staleDate: nil)
+        await activity.end(content, dismissalPolicy: .immediate)
       }
     }
   }
 
-  private static func animateIsland(
-    activityId: String,
-    skin: String,
-    line: String,
-    energy: Int,
-    track: String
-  ) async {
+  /// Sons só enquanto o processo do app está vivo (background). Kill = para na hora.
+  private static func playIslandSounds(startedAt: Date) async {
     let steps = IslandTiming.updateSteps
     let stepDuration = IslandTiming.total / Double(steps)
     var lastPhase: IslandTiming.Phase = .run
     var lastStepSound = Date.distantPast
 
     for i in 0...steps {
+      if IslandTiming.isExpired(startedAt: startedAt, grace: 0) { return }
+
       let progress = Double(i) / Double(steps)
       let phase = IslandTiming.phase(at: progress)
-      let state = CompanionAttributes.ContentState(
-        skin: skin,
-        runProgress: progress,
-        phase: phase.rawValue,
-        line: line,
-        energy: energy,
-        track: track
-      )
-      let content = ActivityContent(
-        state: state,
-        staleDate: Date().addingTimeInterval(IslandTiming.total)
-      )
-      for act in Activity<CompanionAttributes>.activities where act.id == activityId {
-        await act.update(content)
-      }
 
       if phase == .run {
         let now = Date()
@@ -141,14 +116,6 @@ enum LiveActivityController {
         try? await Task.sleep(nanoseconds: UInt64(stepDuration * 1_000_000_000))
       }
     }
-    for act in Activity<CompanionAttributes>.activities where act.id == activityId {
-      await endActivity(act)
-    }
-  }
-
-  private static func endActivity(_ activity: Activity<CompanionAttributes>) async {
-    let content = ActivityContent(state: activity.content.state, staleDate: nil)
-    await activity.end(content, dismissalPolicy: .immediate)
   }
 }
 

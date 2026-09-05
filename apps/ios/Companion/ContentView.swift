@@ -13,6 +13,8 @@ final class CompanionViewModel: ObservableObject {
   @Published var spriteClip: DinoClip = .idle
   @Published var animNonce: Int = 0
   @Published var followUpQueue: [DinoClip] = []
+  private var lastGrowthStage: GrowthStage = .baby
+  private var growthBootstrapped = false
 
   @Published var useLanAPI: Bool = CompanionSnapshotStore.useLanAPI()
   @Published var apiBase: String = CompanionSnapshotStore.savedApiBase() ?? "http://192.168.0.10:3333"
@@ -25,6 +27,7 @@ final class CompanionViewModel: ObservableObject {
   @Published var lowEnergyNotifEnabled: Bool = LowEnergyNotifier.isEnabled
   @Published var missYouNotifEnabled: Bool = LonelinessNotifier.isEnabled
   @Published var pranksEnabled: Bool = PrankController.isEnabled
+  @Published var growthEnabled: Bool = Growth.isEnabled
   @Published var nowPlayingEnabled: Bool = NowPlayingService.isEnabled
   @Published var musicNotifEnabled: Bool = NowPlayingService.musicNotificationsEnabled
   @Published var needsQuiz: Bool = !CompanionQuiz.isCompleted
@@ -34,6 +37,8 @@ final class CompanionViewModel: ObservableObject {
   @Published var missions: [LocalMission] = MissionCatalog.ensureToday()
   @Published var isHatching = false
   @Published var historyTick: Int = 0
+  /// Mensagem já enviada ao balão enquanto a LLM responde (input fica limpo).
+  @Published var pendingChatUser: String?
 
   let pranks = PrankController()
   private var ambientTask: Task<Void, Never>?
@@ -57,32 +62,47 @@ final class CompanionViewModel: ObservableObject {
       }
       turns.append(ChatTurn(id: item.id + "-a", isUser: false, text: item.reactionText))
     }
+    if let pending = pendingChatUser, !pending.isEmpty {
+      turns.append(ChatTurn(id: "pending-user", isUser: true, text: pending))
+    }
     return turns
   }
 
   func bootstrap() async {
-    await LiveActivityController.endExpired()
-    if let session = await SupabaseClient.shared.loadSession() {
+    // Sempre limpa Island ao abrir (se o app foi fechado, não deve continuar travada).
+    await LiveActivityController.endAll()
+    // Sessão persistente: refresh automático ou login anônimo (sem pedir email).
+    if let session = await SupabaseClient.shared.ensurePersistentSession() {
       isLoggedIn = true
-      accountEmail = session.email
+      accountEmail = session.isAnonymous
+        ? "convidado"
+        : (session.email.isEmpty ? "conta" : session.email)
+    } else {
+      isLoggedIn = false
+      accountEmail = ""
     }
     missions = MissionCatalog.ensureToday()
-    _ = MissionCatalog.bump(kind: "OPEN_APP")
+    missions = MissionCatalog.bump(kind: "OPEN_APP")
     NowPlayingService.shared.setEnabled(nowPlayingEnabled)
+    _ = await LowEnergyNotifier.requestPermission()
     if nowPlayingEnabled {
-      _ = await LowEnergyNotifier.requestPermission()
       NowPlayingService.shared.refresh()
     }
-    if CompanionQuiz.isCompleted {
+    let hasPet = !CompanionLocalStore.load().companions.isEmpty
+      || CompanionSnapshotStore.load() != nil
+    if CompanionQuiz.isCompleted || hasPet {
+      if hasPet && !CompanionQuiz.isCompleted {
+        CompanionQuiz.markCompleted()
+      }
+      needsQuiz = false
       apply(snapshot: CompanionSnapshotStore.load() ?? .demo, reaction: nil)
       await refresh()
       await reloadMissions()
       await SyncQueue.flush()
       startAmbientLife()
       if pranksEnabled { pranks.startAmbient() }
-      if !isLoggedIn && SupabaseConfig.isConfigured {
-        showAccountPrompt = true
-      }
+      CompanionNotifier.scheduleProactive(snapshot: snapshot)
+      // Só pede email se quiser sync entre aparelhos — anônimo já sincroniza neste device.
     } else {
       needsQuiz = true
     }
@@ -95,10 +115,12 @@ final class CompanionViewModel: ObservableObject {
     status = usesCloud ? "supabase" : "standalone"
     isHatching = true
     playSprite(.eggMove, queue: [.crack, .hatch, .idle])
-    if usesCloud {
+    if let session = await SupabaseClient.shared.ensurePersistentSession() {
+      isLoggedIn = true
+      accountEmail = session.isAnonymous
+        ? "convidado"
+        : (session.email.isEmpty ? "conta" : session.email)
       await syncBirthToCloud(snap)
-    } else if SupabaseConfig.isConfigured {
-      showAccountPrompt = true
     }
     await reloadMissions()
     // Ambient só depois do hatch (evita cortar ovo → crack → hatch).
@@ -140,10 +162,23 @@ final class CompanionViewModel: ObservableObject {
   }
 
   func logout() {
-    Task { await SupabaseClient.shared.signOut() }
-    isLoggedIn = false
-    accountEmail = ""
-    status = "standalone"
+    Task {
+      await SupabaseClient.shared.signOut()
+      // Volta pro modo convidado (sessão anônima) em vez de ficar offline.
+      if let session = await SupabaseClient.shared.ensurePersistentSession() {
+        await MainActor.run {
+          isLoggedIn = true
+          accountEmail = session.isAnonymous ? "convidado" : session.email
+          status = "supabase"
+        }
+      } else {
+        await MainActor.run {
+          isLoggedIn = false
+          accountEmail = ""
+          status = "standalone"
+        }
+      }
+    }
   }
 
   func setSoundMuted(_ muted: Bool) {
@@ -170,6 +205,17 @@ final class CompanionViewModel: ObservableObject {
   func setPranks(_ enabled: Bool) {
     pranksEnabled = enabled
     pranks.setEnabled(enabled)
+  }
+
+  func setGrowthEnabled(_ enabled: Bool) {
+    growthEnabled = enabled
+    Growth.isEnabled = enabled
+    if !enabled {
+      lastGrowthStage = .baby
+      reaction = "Evolução desligada — só a forma base."
+    } else {
+      reaction = "Evolução beta ligada. Arte ainda em teste."
+    }
   }
 
   func setNowPlaying(_ enabled: Bool) {
@@ -237,6 +283,10 @@ final class CompanionViewModel: ObservableObject {
   }
 
   func onSpriteBecameIdle() {
+    if spriteClip == .sleep {
+      followUpQueue = []
+      return
+    }
     spriteClip = .idle
     followUpQueue = []
     if isHatching {
@@ -284,7 +334,29 @@ final class CompanionViewModel: ObservableObject {
         await syncBirthToCloud(snapshot)
         return
       } catch {
-        status = "supabase offline"
+        if case SupabaseError.sessionExpired = error {
+          if let session = await SupabaseClient.shared.ensurePersistentSession() {
+            isLoggedIn = true
+            accountEmail = session.isAnonymous ? "convidado" : session.email
+            status = "supabase"
+          } else {
+            isLoggedIn = false
+            showAccountPrompt = true
+            status = "login"
+          }
+        } else if case SupabaseError.noSession = error {
+          if let session = await SupabaseClient.shared.ensurePersistentSession() {
+            isLoggedIn = true
+            accountEmail = session.isAnonymous ? "convidado" : session.email
+            status = "supabase"
+          } else {
+            isLoggedIn = false
+            showAccountPrompt = true
+            status = "login"
+          }
+        } else {
+          status = "supabase offline"
+        }
         reaction = error.localizedDescription
       }
     }
@@ -302,15 +374,39 @@ final class CompanionViewModel: ObservableObject {
   func interact(_ type: String) async {
     guard let interaction = InteractionType(rawValue: type) else { return }
     isBusy = true
-    defer { isBusy = false }
+    defer {
+      isBusy = false
+      if type == "CHAT" {
+        pendingChatUser = nil
+        historyTick &+= 1
+      }
+    }
+    pranks.clearLine()
 
     #if canImport(UIKit)
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     #endif
 
+    // CHAT: joga a mensagem no balão na hora e limpa o input.
+    let chatMessage: String? = {
+      guard type == "CHAT" else { return nil }
+      let msg = chatText.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !msg.isEmpty else { return nil }
+      chatText = ""
+      pendingChatUser = msg
+      historyTick &+= 1
+      return msg
+    }()
+
     switch interaction {
     case .POKE:
-      playSprite(.hurt)
+      playSprite(.avoid)
+      reaction = LocalVoice.reaction(
+        name: snapshot.name,
+        archetype: snapshot.archetype,
+        mood: CompanionMood(rawValue: snapshot.mood) ?? .CONTENT,
+        type: .POKE
+      )
     case .PLAY:
       let clip = DinoSpriteCatalog.playClips.randomElement() ?? .jump
       playSprite(clip)
@@ -330,47 +426,45 @@ final class CompanionViewModel: ObservableObject {
       do {
         saveAPIBase()
         let id = try await resolveLanId()
-        let message = type == "CHAT" ? chatText : nil
+        let message = type == "CHAT" ? chatMessage : nil
         let (snap, line) = try await CompanionAPI.shared.interact(id: id, type: type, message: message)
-        if type == "CHAT" { chatText = ""; historyTick &+= 1 }
-        apply(snapshot: snap, reaction: interaction == .PLAY ? reaction : (line ?? "…"))
+        apply(snapshot: snap, reaction: interaction == .PLAY || interaction == .POKE ? reaction : (line ?? "…"))
         await reloadMissions()
       } catch {
         reaction = error.localizedDescription
+        if type == "CHAT", let msg = chatMessage {
+          chatText = msg
+        }
       }
       return
     }
 
-    var message = type == "CHAT" ? chatText : (type == "TEASE" ? "conta uma piada" : nil)
-    if type == "CHAT", let track = NowPlayingService.shared.line {
-      let hint = LocalVoice.musicLine(
-        title: NowPlayingService.shared.title ?? track,
-        artist: NowPlayingService.shared.artist,
-        archetype: snapshot.archetype
-      )
-      let base = message ?? ""
-      message = base.isEmpty ? hint : "\(base) (ouvindo: \(track))"
-    }
+    let message = type == "CHAT" ? chatMessage : (type == "TEASE" ? "conta uma piada" : nil)
 
     let (snap, line) = await CompanionEngine.shared.interact(type: interaction, message: message)
-    if type == "CHAT" { chatText = ""; historyTick &+= 1 }
     if let kind = MissionCatalog.kindFromInteraction(type) {
       missions = MissionCatalog.bump(kind: kind)
+    } else {
+      missions = MissionCatalog.ensureToday()
     }
-    if interaction == .PLAY {
+    if interaction == .PLAY || interaction == .POKE {
       apply(snapshot: snap, reaction: reaction)
     } else {
       apply(snapshot: snap, reaction: line)
     }
     status = usesCloud ? "supabase" : "standalone"
     await pushCloudAfterLocal(snap)
+    // Garante UI alinhada ao catálogo pós-sync (progress nunca some).
+    missions = MissionCatalog.ensureToday()
   }
 
   func reloadMissions() async {
     let local = MissionCatalog.ensureToday()
     if usesCloud {
       do {
-        missions = try await SupabaseClient.shared.syncMissions(local, dayKey: MissionCatalog.dayKey())
+        let synced = try await SupabaseClient.shared.syncMissions(local, dayKey: MissionCatalog.dayKey())
+        MissionCatalog.replaceToday(synced)
+        missions = synced
         return
       } catch {
         SyncQueue.enqueueMissions(local, dayKey: MissionCatalog.dayKey())
@@ -381,7 +475,7 @@ final class CompanionViewModel: ObservableObject {
 
   func claimMission(_ mission: LocalMission) async {
     guard mission.complete, !mission.claimed else { return }
-    if let result = MissionCatalog.claim(mission.id) {
+    if let result = MissionCatalog.claim(mission.id) ?? MissionCatalog.claim(mission.kind) {
       missions = result.missions
       var snap = snapshot
       snap.energy = min(100, snap.energy + Double(result.rewardEnergy))
@@ -395,10 +489,13 @@ final class CompanionViewModel: ObservableObject {
   func startIslandOnLeave() {
     let track = NowPlayingService.shared.line
     let line = [reaction, track].compactMap { $0 }.joined(separator: " · ")
-    do {
-      _ = try LiveActivityController.start(snapshot: snapshot, line: line)
-    } catch {
-      print("[island] \(error.localizedDescription)")
+    let snap = snapshot
+    Task {
+      do {
+        _ = try await LiveActivityController.start(snapshot: snap, line: line)
+      } catch {
+        print("[island] \(error.localizedDescription)")
+      }
     }
   }
 
@@ -437,12 +534,15 @@ final class CompanionViewModel: ObservableObject {
 
   private func pushCloudAfterLocal(_ snap: CompanionSnapshot) async {
     guard usesCloud else { return }
+    let localMissions = MissionCatalog.ensureToday()
     do {
       try await SupabaseClient.shared.pushCompanionState(snap)
-      _ = try await SupabaseClient.shared.syncMissions(missions, dayKey: MissionCatalog.dayKey())
+      let synced = try await SupabaseClient.shared.syncMissions(localMissions, dayKey: MissionCatalog.dayKey())
+      MissionCatalog.replaceToday(synced)
+      missions = synced
     } catch {
       SyncQueue.enqueuePushState(snap)
-      SyncQueue.enqueueMissions(missions, dayKey: MissionCatalog.dayKey())
+      SyncQueue.enqueueMissions(localMissions, dayKey: MissionCatalog.dayKey())
     }
   }
 
@@ -454,8 +554,26 @@ final class CompanionViewModel: ObservableObject {
   }
 
   private func apply(snapshot: CompanionSnapshot, reaction: String?) {
+    // Forma base enquanto growth OFF; com ON usa o stage efetivo do snapshot.
+    lastGrowthStage = Growth.effective(snapshot.growthStage)
+
+    if growthBootstrapped {
+      if snapshot.mood.uppercased() == "SLEEPY", spriteClip == .idle || spriteClip == .sleep {
+        spriteClip = .sleep
+      }
+    } else {
+      growthBootstrapped = true
+      if snapshot.mood.uppercased() == "SLEEPY" {
+        spriteClip = .sleep
+      }
+    }
+
     self.snapshot = snapshot
-    if let reaction { self.reaction = reaction }
+    if let reaction {
+      pranks.clearLine()
+      self.reaction = reaction
+      WidgetSpeechStore.saveIdle(line: reaction, name: snapshot.name)
+    }
     CompanionSnapshotStore.save(snapshot)
     WidgetReloader.reload()
     LowEnergyNotifier.check(energyPercent: snapshot.energyPercent, companionName: snapshot.name)
@@ -552,19 +670,29 @@ struct ContentView: View {
       .onReceive(NotificationCenter.default.publisher(for: .companionNowPlayingChanged)) { note in
         if let line = note.userInfo?["line"] as? String, !line.isEmpty {
           model.reaction = line
+          WidgetSpeechStore.saveIdle(line: line, name: model.snapshot.name)
+          WidgetReloader.reload()
         }
       }
       .onChange(of: scenePhase) { phase in
-        if phase == .background, !model.needsQuiz {
-          model.startIslandOnLeave()
-        }
         if phase == .active {
-          NowPlayingService.shared.refresh()
           Task {
-            await LiveActivityController.endExpired()
+            await LiveActivityController.endAll()
             await SyncQueue.flush()
           }
+          model.missions = MissionCatalog.ensureToday()
+          Task { await model.reloadMissions() }
+          NowPlayingService.shared.refresh()
+          CompanionNotifier.scheduleProactive(snapshot: model.snapshot)
         }
+        if phase == .background, !model.needsQuiz {
+          model.startIslandOnLeave()
+          CompanionNotifier.scheduleProactive(snapshot: model.snapshot)
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+        model.missions = MissionCatalog.ensureToday()
+        Task { await model.reloadMissions() }
       }
     }
   }
@@ -575,6 +703,7 @@ struct ContentView: View {
         skin: model.snapshot.skin,
         clip: model.spriteClip,
         mood: model.snapshot.mood,
+        growthStage: Growth.effective(model.snapshot.growthStage).rawValue,
         size: 168,
         animNonce: model.animNonce,
         followUpQueue: model.followUpQueue,

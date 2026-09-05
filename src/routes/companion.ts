@@ -7,6 +7,7 @@ import { generateReaction } from "../llm";
 import { computeAlert, moodText } from "../companionStatus";
 import { AuthedRequest, requireAuth } from "../auth";
 import { bumpMission, kindFromInteraction } from "../missions";
+import { normalizeGrowthStage, shouldEvolve, effectiveGrowthStage, type GrowthStage } from "../growth";
 
 export const companionRouter = Router();
 
@@ -17,13 +18,43 @@ const createSchema = z.object({
   artStyle: z.string().max(40).optional(),
   backdrop: z.string().max(40).optional(),
   archetype: z.string().max(40).optional(),
+  growthStage: z.string().max(20).optional(),
 });
+
+type GrowthFields = {
+  growthStage?: string | null;
+  growthStageAt?: Date | null;
+  createdAt: Date;
+};
+
+function stageStartedAt(c: GrowthFields): Date {
+  return c.growthStageAt ?? c.createdAt;
+}
+
+/** Resolve next stage; when evolving, reset growthStageAt to now. */
+function resolveGrowth(
+  companion: GrowthFields,
+  affection: number,
+  now: Date
+): { growthStage: GrowthStage; growthStageAt: Date } {
+  const stage = normalizeGrowthStage(companion.growthStage);
+  const next = shouldEvolve({
+    stage,
+    stageStartedAt: stageStartedAt(companion),
+    affection,
+    now,
+  });
+  if (next) return { growthStage: next, growthStageAt: now };
+  return { growthStage: stage, growthStageAt: stageStartedAt(companion) };
+}
 
 function companionPayload(c: {
   id: string;
   name: string;
   personality: string;
   skin: string;
+  growthStage?: string;
+  growthStageAt?: Date;
   artStyle: string;
   backdrop: string;
   archetype: string;
@@ -33,12 +64,15 @@ function companionPayload(c: {
   lastInteractionAt: Date;
   pendingAlert: string | null;
   memoryNotes: string[];
+  createdAt?: Date;
 }) {
   return {
     id: c.id,
     name: c.name,
     personality: c.personality,
     skin: c.skin,
+    growthStage: effectiveGrowthStage(c.growthStage),
+    growthStageAt: c.growthStageAt ?? c.createdAt,
     artStyle: c.artStyle,
     backdrop: c.backdrop,
     archetype: c.archetype,
@@ -46,6 +80,7 @@ function companionPayload(c: {
     energy: c.energy,
     affection: c.affection,
     lastInteractionAt: c.lastInteractionAt,
+    createdAt: c.createdAt,
     moodText: moodText(c.name, c.mood),
     alert: c.pendingAlert ?? computeAlert(c.name, c.mood),
     memoryNotes: c.memoryNotes,
@@ -62,12 +97,15 @@ companionRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(200).json(companionPayload(existing));
   }
 
+  const now = new Date();
   const created = await prisma.companion.create({
     data: {
       userId,
       name: parsed.data.name,
       personality: parsed.data.personality ?? parsed.data.archetype ?? "curioso",
       skin: parsed.data.skin ?? "dino-mort",
+      growthStage: normalizeGrowthStage(parsed.data.growthStage ?? "baby"),
+      growthStageAt: now,
       artStyle: parsed.data.artStyle ?? "pixel",
       backdrop: parsed.data.backdrop ?? "sky",
       archetype: parsed.data.archetype ?? "curioso",
@@ -86,6 +124,8 @@ companionRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
 
   const now = new Date();
   const decayed = applyTimeDecay(companion, now);
+  const growth = resolveGrowth(companion, decayed.affection, now);
+
   const updated = await prisma.companion.update({
     where: { id: companion.id },
     data: {
@@ -93,6 +133,8 @@ companionRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
       affection: decayed.affection,
       mood: decayed.mood,
       lastDecayAt: now,
+      growthStage: growth.growthStage,
+      growthStageAt: growth.growthStageAt,
     },
   });
   return res.json(companionPayload(updated));
@@ -110,6 +152,7 @@ companionRouter.get("/:id/state", requireAuth, async (req: AuthedRequest, res) =
 
   const now = new Date();
   const decayed = applyTimeDecay(companion, now);
+  const growth = resolveGrowth(companion, decayed.affection, now);
   const updated = await prisma.companion.update({
     where: { id: companion.id },
     data: {
@@ -117,6 +160,8 @@ companionRouter.get("/:id/state", requireAuth, async (req: AuthedRequest, res) =
       affection: decayed.affection,
       mood: decayed.mood,
       lastDecayAt: now,
+      growthStage: growth.growthStage,
+      growthStageAt: growth.growthStageAt,
     },
   });
   return res.json(companionPayload(updated));
@@ -125,6 +170,8 @@ companionRouter.get("/:id/state", requireAuth, async (req: AuthedRequest, res) =
 const interactSchema = z.object({
   type: z.enum(["POKE", "FEED", "CHAT", "PLAY", "TEASE", "IGNORE_CHECK"]),
   message: z.string().max(500).optional(),
+  trackTitle: z.string().max(120).optional(),
+  growthEnabled: z.boolean().optional(),
 });
 
 companionRouter.post("/:id/interact", requireAuth, async (req: AuthedRequest, res) => {
@@ -147,13 +194,38 @@ companionRouter.post("/:id/interact", requireAuth, async (req: AuthedRequest, re
     daysSinceInteraction
   );
 
+  const growth = resolveGrowth(companion, result.affection, now);
+  const stageForVoice = normalizeGrowthStage(companion.growthStage);
+
+  const historyRows =
+    type === "CHAT"
+      ? await prisma.interaction.findMany({
+          where: { companionId: companion.id, type: "CHAT" },
+          orderBy: { createdAt: "asc" },
+          take: 8,
+        })
+      : [];
+  const history = historyRows.flatMap((row) => {
+    const turns: { role: "user" | "assistant"; content: string }[] = [];
+    if (row.userMessage) turns.push({ role: "user", content: row.userMessage });
+    turns.push({ role: "assistant", content: row.reactionText });
+    return turns;
+  });
+
   const reactionText = await generateReaction({
-    companion: { ...companion, archetype: companion.archetype },
+    companion: {
+      ...companion,
+      archetype: companion.archetype,
+      growthStage: stageForVoice,
+    },
     type,
     mood: result.mood,
     energy: result.energy,
     affection: result.affection,
     userMessage: parsed.data.message ?? (type === "TEASE" ? "conta uma piada" : undefined),
+    history,
+    musicHint: parsed.data.trackTitle,
+    growthEnabled: parsed.data.growthEnabled,
   });
 
   const [updatedCompanion, interaction] = await prisma.$transaction([
@@ -166,6 +238,8 @@ companionRouter.post("/:id/interact", requireAuth, async (req: AuthedRequest, re
         lastDecayAt: now,
         lastInteractionAt: now,
         pendingAlert: null,
+        growthStage: growth.growthStage,
+        growthStageAt: growth.growthStageAt,
       },
     }),
     prisma.interaction.create({

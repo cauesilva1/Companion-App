@@ -89,6 +89,10 @@ interface SessionData {
   missions?: LocalMission[];
   authToken?: string;
   authEmail?: string;
+  growthEnabled?: boolean;
+  supabaseAccess?: string;
+  supabaseRefresh?: string;
+  supabaseAnonymous?: boolean;
 }
 
 let companionId = "";
@@ -116,6 +120,9 @@ let perceiveApp = true;
 let useWindowTitle = true;
 let commentMedia = true;
 let screenVision = false;
+let growthEnabled = false;
+let pendingSbAccess: string | undefined;
+let pendingSbRefresh: string | undefined;
 let streakCount = 0;
 let lastVisitDay = "";
 let missionsDay = "";
@@ -302,6 +309,7 @@ function loadSession() {
       useWindowTitle = data.useWindowTitle !== false;
       commentMedia = data.commentMedia !== false;
       screenVision = !!data.screenVision;
+      growthEnabled = data.growthEnabled === true;
       streakCount = typeof data.streakCount === "number" ? data.streakCount : 0;
       lastVisitDay = typeof data.lastVisitDay === "string" ? data.lastVisitDay : "";
       missionsDay = typeof data.missionsDay === "string" ? data.missionsDay : "";
@@ -315,6 +323,8 @@ function loadSession() {
       if (data.skinId && isValidSkinId(data.skinId)) currentSkinId = normalizeSkinId(data.skinId);
       savedX = typeof data.x === "number" ? data.x : undefined;
       savedY = typeof data.y === "number" ? data.y : undefined;
+      pendingSbAccess = typeof data.supabaseAccess === "string" ? data.supabaseAccess : undefined;
+      pendingSbRefresh = typeof data.supabaseRefresh === "string" ? data.supabaseRefresh : undefined;
     }
   } catch {
     companionId = "";
@@ -339,12 +349,16 @@ function saveSession() {
     useWindowTitle,
     commentMedia,
     screenVision,
+    growthEnabled,
     streakCount,
     lastVisitDay,
     missionsDay,
     missions: missionsList,
     authToken: authToken || undefined,
     authEmail: authEmail || undefined,
+    supabaseAccess: supabaseCloud.getSession()?.access_token,
+    supabaseRefresh: supabaseCloud.getSession()?.refresh_token,
+    supabaseAnonymous: supabaseCloud.isAnonymousSession(),
   };
   if (mainWindow && !mainWindow.isDestroyed()) {
     const [x, y] = mainWindow.getPosition();
@@ -417,7 +431,7 @@ function windowSize(): { w: number; h: number } {
 }
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return missionCatalog.dayKey();
 }
 
 function isFocusModeActive() {
@@ -442,12 +456,14 @@ function settingsPayload() {
     useWindowTitle,
     commentMedia,
     screenVision,
+    growthEnabled,
     streakCount,
-    missions: { day: missionsDay, items: missionsList },
+    missions: { day: missionsDay, items: missionsList, dayLabel: missionCatalog.displayDayLabel() },
     screenHint: lastScreenHint,
     screenApp: lastScreenApp,
     authEmail: authEmail || "",
     loggedIn: !!authToken || !!supabaseCloud.getSession(),
+    isAnonymous: supabaseCloud.isAnonymousSession(),
     apiUrl: API_URL,
     supabaseConfigured: !!(SUPABASE_URL && SUPABASE_ANON_KEY),
   };
@@ -515,6 +531,25 @@ function bumpMissionFromInteraction(type: string) {
   void flushMissionsToCloud();
 }
 
+async function claimMission(idOrKind: string) {
+  ensureDailyProgress();
+  const result = missionCatalog.claim(missionsList, idOrKind);
+  if (!result) return null;
+  missionsList = result.missions;
+  cachedEnergy = Math.min(100, cachedEnergy + result.rewardEnergy);
+  cachedAffection = Math.min(100, cachedAffection + result.rewardAffection);
+  saveSession();
+  emitSettings();
+  void flushMissionsToCloud();
+  return {
+    missions: missionsList,
+    rewardEnergy: result.rewardEnergy,
+    rewardAffection: result.rewardAffection,
+    energy: cachedEnergy,
+    affection: cachedAffection,
+  };
+}
+
 function timeOfDay(): string {
   const h = new Date().getHours();
   if (h >= 5 && h < 12) return "morning";
@@ -569,7 +604,8 @@ function presencePayload(extra?: { missedYou?: boolean }) {
     theme: nativeTheme.shouldUseDarkColors ? "dark" : "light",
     batteryPercent,
     batteryLow,
-    trackTitle: lastTrackTitle || undefined,
+    trackTitle:
+      listeningMusic || listeningMusicManual ? lastTrackTitle || undefined : undefined,
     frontApp: lastScreenApp || undefined,
     screenHint: lastScreenHint || undefined,
     screenKind: lastScreenKind || undefined,
@@ -580,7 +616,7 @@ async function refreshNowPlaying() {
   try {
     const info = await getNowPlaying();
     const prev = lastTrackTitle;
-    if (info?.playing) {
+    if (info?.playing && info.title) {
       listeningMusic = true;
       lastTrackTitle = [info.title, info.artist].filter(Boolean).join(" — ");
       if (lastTrackTitle && lastTrackTitle !== prev) {
@@ -595,10 +631,10 @@ async function refreshNowPlaying() {
         }
       }
     } else if (!listeningMusicManual) {
+      // Parou / idle (sem faixa ativa) — limpa sticky title (paridade iOS)
       listeningMusic = false;
-      lastTrackTitle = info?.title
-        ? [info.title, info.artist].filter(Boolean).join(" — ")
-        : "";
+      lastTrackTitle = "";
+      lastNotifiedTrack = "";
     }
   } catch {
     /* ignore */
@@ -1280,6 +1316,10 @@ ipcMain.handle("companion:getSession", () => settingsPayload());
 
 ipcMain.handle("companion:getSettings", () => settingsPayload());
 
+ipcMain.handle("companion:claimMission", async (_e, idOrKind: string) => {
+  return claimMission(String(idOrKind ?? ""));
+});
+
 function applySettingsPatch(patch: Record<string, unknown> = {}) {
   const prevCompact = compact;
   const prevHabitat = habitatMode;
@@ -1305,6 +1345,7 @@ function applySettingsPatch(patch: Record<string, unknown> = {}) {
   if (typeof patch.useWindowTitle === "boolean") useWindowTitle = patch.useWindowTitle;
   if (typeof patch.commentMedia === "boolean") commentMedia = patch.commentMedia;
   if (typeof patch.screenVision === "boolean") screenVision = patch.screenVision;
+  if (typeof patch.growthEnabled === "boolean") growthEnabled = patch.growthEnabled;
   if (typeof patch.listeningMusic === "boolean") {
     listeningMusicManual = patch.listeningMusic;
     listeningMusic = patch.listeningMusic;
@@ -1421,7 +1462,7 @@ ipcMain.handle("companion:login", async (_e, email: string, password: string) =>
     emitSettings();
     return { ok: true, email: authEmail, companionId };
   } catch (err) {
-    return { ok: false, error: String(err) };
+    return { ok: false, error: supabaseCloud.formatAuthError(err) };
   }
 });
 
@@ -1445,7 +1486,23 @@ ipcMain.handle("companion:register", async (_e, email: string, password: string)
     emitSettings();
     return { ok: true, email: authEmail };
   } catch (err) {
-    return { ok: false, error: String(err) };
+    return { ok: false, error: supabaseCloud.formatAuthError(err) };
+  }
+});
+
+ipcMain.handle("companion:resetPassword", async (_e, email: string) => {
+  try {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      return { ok: false, error: "Supabase não configurado" };
+    }
+    const trimmed = String(email || "").trim();
+    if (!trimmed.includes("@")) {
+      return { ok: false, error: "Informe o email da conta" };
+    }
+    await supabaseCloud.requestPasswordReset(trimmed);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: supabaseCloud.formatAuthError(err) };
   }
 });
 
@@ -1457,6 +1514,15 @@ ipcMain.handle("companion:logout", async () => {
   }
   authToken = "";
   authEmail = "";
+  try {
+    const s = await supabaseCloud.ensurePersistentSession();
+    if (s?.user) {
+      authEmail = s.user.email ? s.user.email : "convidado";
+      authToken = s.access_token ?? "supabase";
+    }
+  } catch {
+    /* ignore */
+  }
   saveSession();
   emitSettings();
   return { ok: true };
@@ -1597,6 +1663,7 @@ ipcMain.handle("companion:interact", async (_e, type: string, message?: string) 
       type,
       pranksEnabled,
       rememberChats,
+      growthEnabled,
       trackTitle: lastTrackTitle || undefined,
       screenHint: perceiveApp ? lastScreenHint || undefined : undefined,
     };
@@ -1665,14 +1732,12 @@ ipcMain.handle("companion:setSkin", (_e, skinId: string) => {
 
 ipcMain.handle("companion:media", async (_e, cmd: "prev" | "toggle" | "next") => {
   const result = await mediaCommand(cmd);
-  if (result.info?.playing) {
+  if (result.info?.playing && result.info.title) {
     listeningMusic = true;
     lastTrackTitle = [result.info.title, result.info.artist].filter(Boolean).join(" — ");
   } else if (!listeningMusicManual) {
     listeningMusic = false;
-    lastTrackTitle = result.info?.title
-      ? [result.info.title, result.info.artist].filter(Boolean).join(" — ")
-      : "";
+    lastTrackTitle = "";
   }
   emitPresence();
   return {
@@ -1844,6 +1909,22 @@ app.whenReady().then(async () => {
     );
   }
   loadSession();
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    try {
+      const s = await supabaseCloud.ensurePersistentSession({
+        access: pendingSbAccess,
+        refresh: pendingSbRefresh,
+      });
+      if (s?.user) {
+        if (!s.user.email) authEmail = "convidado";
+        else if (!authEmail) authEmail = s.user.email;
+      }
+      saveSession();
+      emitSettings();
+    } catch (err) {
+      console.warn("[desktop] supabase session:", err);
+    }
+  }
   ensureDailyProgress({ openApp: true });
   await refreshBattery();
   await refreshNowPlaying();

@@ -1,4 +1,5 @@
 import { InteractionType, Mood } from "@prisma/client";
+import { normalizeGrowthStage, stageWordLimit } from "./growth";
 
 export type Archetype = "curioso" | "preguicoso" | "carinhoso" | "zoeiro" | "misterioso";
 export type PrankKind = "shake" | "bounce" | "notify" | "tease-sound" | "hide-and-seek";
@@ -10,6 +11,7 @@ export interface LocalVoiceParams {
   type: InteractionType;
   userMessage?: string | null;
   hour?: number;
+  growthStage?: string;
 }
 
 const ARCH: Archetype[] = ["curioso", "preguicoso", "carinhoso", "zoeiro", "misterioso"];
@@ -31,11 +33,11 @@ const PLAY: Record<Archetype, string[]> = {
 };
 
 const POKE: Record<Archetype, string[]> = {
-  curioso: ["Hmm? O que tem aí?", "Cutucou o quê exatamente?"],
-  preguicoso: ["...vai embora, tô de boa.", "Cinco minutos de paz, por favor."],
-  carinhoso: ["Hehe, cócegas!", "Fico feliz com qualquer carinho."],
-  zoeiro: ["Ei! Guerra de cutucadas!", "Você pediu por isso."],
-  misterioso: ["...sinto sua presença.", "Não me provoque sem motivo."],
+  curioso: ["Ops — desviei! O que você queria testar?", "Quase! Reflexo científico.", "Errou. Eu esquivei."],
+  preguicoso: ["Nem com esforço. Desviei deitado.", "Ugh. Cutucada rejeitada.", "Não. Longe do meu sofá."],
+  carinhoso: ["Hehe, errou o carinho!", "Desviei… mas ainda te amo.", "Quase me pegou! Tenta de novo?"],
+  zoeiro: ["Ha! Errou feio.", "Nem toca. Eu sou ninja.", "Plot twist: eu desvio."],
+  misterioso: ["Você tocou o ar.", "Eu já não estava ali.", "O dedo passou… eu sumi."],
 };
 
 const GENERIC: Record<Mood, string[]> = {
@@ -143,48 +145,90 @@ export function activityLabel(
   return "Presente";
 }
 
+function clipByStage(text: string, growthStage?: string): string {
+  const max = stageWordLimit(normalizeGrowthStage(growthStage));
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= max) return text.trim();
+  return words.slice(0, max).join(" ");
+}
+
 export function localReaction(params: LocalVoiceParams): string {
   const arch = asArch(params.archetype);
   const { type, mood, userMessage, name } = params;
+  const stage = normalizeGrowthStage(params.growthStage);
+
+  let line: string;
 
   if (type === "CHAT" && userMessage) {
     const lower = userMessage.toLowerCase();
     if (/como (voce|você) (esta|está)|tudo bem|td bem|e ai|e aí/.test(lower)) {
-      return HOW_ARE_YOU[arch][mood];
+      line = HOW_ARE_YOU[arch][mood];
+      if (stage === "baby") {
+        line = pick({
+          curioso: ["Tô bem! Conta coisa!", "Bem curioso. E você?"],
+          preguicoso: ["Tô de boa...", "Preguiça boa."],
+          carinhoso: ["Tô bem com você!", "Feliz agora!"],
+          zoeiro: ["Tô bem! Quase zoando.", "Bem demais!"],
+          misterioso: ["Estou... presente.", "Bem. Em silêncio."],
+        }[arch]);
+      }
+      return clipByStage(line, params.growthStage);
     }
     if (/oi|olá|ola|hey|eae/.test(lower)) {
-      return pick({
-        curioso: [`Oi! Sou ${name}. O que rolou?`, "E aí! Me atualiza."],
-        preguicoso: ["Oi... sem pressa.", `Fala, ${name} tá online. Quase.`],
-        carinhoso: [`Oi! Senti sua voz.`, "Olá! Chega mais."],
-        zoeiro: ["Eae. Aprontou o quê hoje?", "Oi. Já ia te zoar."],
-        misterioso: ["Saudações.", "Você chegou. Eu sabia."],
-      }[arch]);
+      if (stage === "baby") {
+        line = pick({
+          curioso: [`Oi! Sou ${name}!`, "Oi oi! O que rolou?"],
+          preguicoso: ["Oi... sem pressa.", "Fala... tô aqui."],
+          carinhoso: ["Oi! Senti você!", "Olá! Chega!"],
+          zoeiro: ["Eae!", "Oi! Já ia zoar."],
+          misterioso: ["Oi.", "Você chegou."],
+        }[arch]);
+      } else if (stage === "adult") {
+        line = pick({
+          curioso: [`Oi. Sou ${name} — me conta o dia.`, "E aí. Quero novidade de verdade."],
+          preguicoso: ["Oi. Sem pressa, como sempre.", `${name} online. Quase produtivo.`],
+          carinhoso: ["Oi. Que bom ouvir você.", "Olá. Fica um pouco?"],
+          zoeiro: ["Eae. Aprontou o quê hoje?", "Oi. Já ia te zoar com carinho."],
+          misterioso: ["Saudações. Eu esperava você.", "Você chegou. Eu sabia."],
+        }[arch]);
+      } else {
+        line = pick({
+          curioso: [`Oi! Sou ${name}. O que rolou?`, "E aí! Me atualiza."],
+          preguicoso: ["Oi... sem pressa.", `Fala, ${name} tá online. Quase.`],
+          carinhoso: [`Oi! Senti sua voz.`, "Olá! Chega mais."],
+          zoeiro: ["Eae. Aprontou o quê hoje?", "Oi. Já ia te zoar."],
+          misterioso: ["Saudações.", "Você chegou. Eu sabia."],
+        }[arch]);
+      }
+      return clipByStage(line, params.growthStage);
     }
     if (/apronta|pegadinha|travessura|prega pe[cç]a/.test(lower)) {
-      return pick({
+      line = pick({
         curioso: ["Hmm, experimentando o caos controlado...", "Uma ideia bagunçada surgindo."],
         preguicoso: ["Preguiça de aprontar... mas vá lá.", "Ok. Uma travessura mínima."],
         carinhoso: ["Só se for de leve, prometo!", "Travessura fofa, combinado?"],
         zoeiro: ["Finalmente. Segura aí.", "Missão: bagunça nível 1."],
         misterioso: ["O véu se move...", "Uma sombra passa. Observe."],
       }[arch]);
+      return clipByStage(line, params.growthStage);
     }
   }
 
-  if (type === "PLAY") return pick(PLAY[arch]);
-  if (type === "POKE") return pick(POKE[arch]);
-  if (type === "TEASE") {
-    return pick({
+  if (type === "PLAY") line = pick(PLAY[arch]);
+  else if (type === "POKE") line = pick(POKE[arch]);
+  else if (type === "TEASE") {
+    line = pick({
       curioso: ["Por que o ovo foi pro psicólogo? Estava rachado por dentro."],
       preguicoso: ["Minha piada favorita é… dormir. Ponto final."],
       carinhoso: ["Você é minha punchline favorita."],
       zoeiro: ["Qual o dino mais chato? O Compsógnato-te-liguei."],
       misterioso: ["O silêncio também é uma piada. Você que não ri."],
     }[arch]);
+  } else {
+    line = pick(GENERIC[mood]);
   }
 
-  return pick(GENERIC[mood]);
+  return clipByStage(line, params.growthStage);
 }
 
 export function suggestPrank(

@@ -47,8 +47,25 @@ const ROTATION: MissionDef[][] = [
   ],
 ];
 
-export function dayKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
+/** dayKey local YYYY-MM-DD (espelha iOS Calendar.current). */
+export function dayKey(date = new Date(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = parts.find((p) => p.type === "year")!.value;
+  const m = parts.find((p) => p.type === "month")!.value;
+  const d = parts.find((p) => p.type === "day")!.value;
+  return `${y}-${m}-${d}`;
+}
+
+export function displayDayLabel(date = new Date()): string {
+  const key = dayKey(date);
+  const parts = key.split("-");
+  if (parts.length !== 3) return "Hoje";
+  return `Hoje · ${parts[2]}/${parts[1]}`;
 }
 
 function defsForDay(key: string): MissionDef[] {
@@ -116,9 +133,11 @@ export function kindFromInteraction(type: string): MissionKind | null {
 
 export function claim(
   missions: LocalMission[],
-  id: string
+  idOrKind: string
 ): { missions: LocalMission[]; rewardEnergy: number; rewardAffection: number } | null {
-  const idx = missions.findIndex((m) => m.id === id);
+  let idx = missions.findIndex((m) => m.id === idOrKind);
+  if (idx < 0) idx = missions.findIndex((m) => m.kind === idOrKind);
+  if (idx < 0) idx = missions.findIndex((m) => idOrKind.includes(m.kind));
   if (idx < 0) return null;
   const m = missions[idx];
   if (m.claimed || m.progress < m.target) return null;

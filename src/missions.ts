@@ -1,8 +1,18 @@
 import { MissionKind, Prisma } from "@prisma/client";
 import { prisma } from "./db";
 
-export function dayKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
+/** dayKey local YYYY-MM-DD (espelha iOS / desktop — não UTC). */
+export function dayKey(date = new Date(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = parts.find((p) => p.type === "year")!.value;
+  const m = parts.find((p) => p.type === "month")!.value;
+  const d = parts.find((p) => p.type === "day")!.value;
+  return `${y}-${m}-${d}`;
 }
 
 type MissionDef = {

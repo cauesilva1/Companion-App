@@ -5,28 +5,35 @@ import UIKit
 
 enum DinoClip: String, Equatable, CaseIterable {
   case idle, move, jump, dash, hurt, kick, bite, scan, avoid
+  case sleep, look, eat
   case eggMove, crack, hatch
+  case evolveBabyTeen, evolveTeenAdult
 
-  /// FPS iguais ao desktop `DINO_CLIPS`.
+  /// FPS calibrados com o desktop (Arks 3–6 frames).
   var fps: Double {
     switch self {
-    case .idle: return 5
-    case .move: return 10
-    case .jump: return 8
-    case .dash: return 12
-    case .hurt, .kick, .bite: return 10
-    case .scan: return 8
-    case .avoid: return 6
-    case .eggMove: return 6
-    case .crack, .hatch: return 7
+    case .idle, .look: return 4
+    case .move: return 8
+    case .jump: return 7
+    case .dash: return 10
+    case .hurt, .kick, .bite: return 8
+    case .scan: return 7
+    case .avoid: return 5
+    case .sleep: return 3
+    case .eat: return 6
+    case .eggMove: return 5
+    case .crack, .hatch: return 6
+    case .evolveBabyTeen, .evolveTeenAdult: return 5
     }
   }
 
-  var isLooping: Bool { self == .idle }
+  var isLooping: Bool { self == .idle || self == .sleep }
 
   var assetSuffix: String {
     switch self {
     case .eggMove: return "EggMove"
+    case .evolveBabyTeen: return "EvolveBabyTeen"
+    case .evolveTeenAdult: return "EvolveTeenAdult"
     default:
       return rawValue.prefix(1).uppercased() + rawValue.dropFirst()
     }
@@ -37,33 +44,66 @@ enum DinoSpriteCatalog {
   static let playClips: [DinoClip] = [.jump, .move, .dash, .bite, .kick]
 
   static func folderName(forSkin skin: String) -> String {
-    switch skin.lowercased() {
-    case "dino-doux", "doux": return "Doux"
-    case "dino-vita", "vita": return "Vita"
-    case "dino-olaf", "olaf": return "Olaf"
-    case "dino-kuro", "kuro": return "Kuro"
-    case "dino-mort", "mort": return "Mort"
+    let key = skin.lowercased().replacingOccurrences(of: "dino-", with: "")
+    switch key {
+    case "doux": return "Doux"
+    case "vita": return "Vita"
+    case "olaf": return "Olaf"
+    case "kuro": return "Kuro"
+    case "mort": return "Mort"
+    case "cole": return "Cole"
+    case "kira": return "Kira"
+    case "loki": return "Loki"
+    case "mono": return "Mono"
+    case "nico": return "Nico"
+    case "sena": return "Sena"
+    case "tard": return "Tard"
     default: return "Mort"
     }
   }
 
-  static func sheetName(skin: String, clip: DinoClip) -> String {
-    "Sheet\(folderName(forSkin: skin))\(clip.assetSuffix)"
+  /// Nomes candidatos: com growth off, só sheets clássicos (base Arks).
+  static func sheetCandidates(skin: String, clip: DinoClip, stage: GrowthStage) -> [String] {
+    let base = folderName(forSkin: skin)
+    let suffix = clip.assetSuffix
+    if clip == .evolveBabyTeen || clip == .evolveTeenAdult {
+      return Growth.isEnabled ? ["Sheet\(base)\(suffix)"] : []
+    }
+    var names: [String] = []
+    if Growth.isEnabled {
+      switch stage {
+      case .teen:
+        names.append("Sheet\(base)Teen\(suffix)")
+      case .adult:
+        names.append("Sheet\(base)Adult\(suffix)")
+      case .baby:
+        break
+      }
+    }
+    names.append("Sheet\(base)\(suffix)")
+    return names
+  }
+
+  static func sheetName(skin: String, clip: DinoClip, stage: GrowthStage = .baby) -> String {
+    sheetCandidates(skin: skin, clip: clip, stage: stage).first ?? "SheetMortIdle"
   }
 
   #if canImport(UIKit)
   private static var sheetCache: [String: UIImage] = [:]
   private static var frameCache: [String: UIImage] = [:]
+  private static var missing: Set<String> = []
 
-  static func sheetImage(skin: String, clip: DinoClip) -> UIImage? {
-    let name = sheetName(skin: skin, clip: clip)
-    if let hit = sheetCache[name] { return hit }
-    if let img = UIImage(named: name) {
-      sheetCache[name] = img
-      return img
+  static func sheetImage(skin: String, clip: DinoClip, stage: GrowthStage = .baby) -> UIImage? {
+    for name in sheetCandidates(skin: skin, clip: clip, stage: stage) {
+      if missing.contains(name) { continue }
+      if let hit = sheetCache[name] { return hit }
+      if let img = UIImage(named: name) {
+        sheetCache[name] = img
+        return img
+      }
+      missing.insert(name)
     }
     if clip == .idle, let avatar = UIImage(named: CompanionSnapshot.imageName(forSkin: skin)) {
-      sheetCache[name] = avatar
       return avatar
     }
     return nil
@@ -97,6 +137,7 @@ struct DinoSpriteView: View {
   let skin: String
   var clip: DinoClip = .idle
   var mood: String = "HAPPY"
+  var growthStage: String = "baby"
   var size: CGFloat = 160
   var animNonce: Int = 0
   /// Fila após o clip atual (ex.: crack→hatch→idle).
@@ -110,8 +151,12 @@ struct DinoSpriteView: View {
   @State private var lastHandledNonce = -1
   @State private var completionArmed = false
 
+  private var stage: GrowthStage { Growth.effective(growthStage) }
+
+  private var visualScale: CGFloat { Growth.scale(for: stage) }
+
   private var clipFps: Double {
-    if playing == .idle, mood.uppercased() == "SLEEPY" { return 2 }
+    if (playing == .idle || playing == .sleep), mood.uppercased() == "SLEEPY" { return 2 }
     return playing.fps
   }
 
@@ -120,15 +165,20 @@ struct DinoSpriteView: View {
       frameView(at: context.date)
     }
     .frame(width: size, height: size)
+    .scaleEffect(visualScale)
     .onAppear { boot() }
     .onChange(of: animNonce) { _ in play(clip, queue: followUpQueue, nonce: animNonce) }
     .onChange(of: clip) { newClip in
       if newClip == .idle, playing == .idle { return }
+      if newClip == .sleep, playing == .sleep { return }
       play(newClip, queue: followUpQueue, nonce: animNonce)
     }
     .onChange(of: skin) { _ in
       startedAt = Date()
-      completionArmed = playing != .idle
+      completionArmed = !playing.isLooping
+    }
+    .onChange(of: growthStage) { _ in
+      startedAt = Date()
     }
   }
 
@@ -150,8 +200,8 @@ struct DinoSpriteView: View {
   @ViewBuilder
   private func frameView(at date: Date) -> some View {
     #if canImport(UIKit)
-    let key = DinoSpriteCatalog.sheetName(skin: skin, clip: playing)
-    if let sheet = DinoSpriteCatalog.sheetImage(skin: skin, clip: playing) {
+    let key = DinoSpriteCatalog.sheetName(skin: skin, clip: playing, stage: stage)
+    if let sheet = DinoSpriteCatalog.sheetImage(skin: skin, clip: playing, stage: stage) {
       let count = max(1, DinoSpriteCatalog.frameCount(for: sheet))
       let index = frameIndex(at: date, count: count)
       Image(uiImage: DinoSpriteCatalog.frameImage(sheetKey: key, sheet: sheet, index: index))
@@ -161,13 +211,12 @@ struct DinoSpriteView: View {
         .frame(width: size, height: size)
         .accessibilityLabel("Dino \(skin)")
     } else if isEggSequence(playing) {
-      // Sem fallback para idle — evita “pular” o hatch.
       let count = max(4, Int(playing.fps))
       let index = frameIndex(at: date, count: count)
       eggPlaceholder(frame: index, total: count)
         .frame(width: size, height: size)
-    } else if let idle = DinoSpriteCatalog.sheetImage(skin: skin, clip: .idle) {
-      let idleKey = DinoSpriteCatalog.sheetName(skin: skin, clip: .idle)
+    } else if let idle = DinoSpriteCatalog.sheetImage(skin: skin, clip: .idle, stage: stage) {
+      let idleKey = DinoSpriteCatalog.sheetName(skin: skin, clip: .idle, stage: stage)
       Image(uiImage: DinoSpriteCatalog.frameImage(sheetKey: idleKey, sheet: idle, index: 0))
         .resizable()
         .interpolation(.none)
@@ -206,6 +255,12 @@ struct DinoSpriteView: View {
   private func frameIndex(at date: Date, count: Int) -> Int {
     if playing.isLooping {
       let tick = Int(date.timeIntervalSinceReferenceDate * clipFps)
+      // Ping-pong no idle/sleep (3+ frames) — respira sem hard cut
+      if (playing == .idle || playing == .sleep), count >= 3 {
+        let cycle = (count - 1) * 2
+        let t = ((tick % cycle) + cycle) % cycle
+        return t < count ? t : cycle - t
+      }
       return ((tick % count) + count) % count
     }
     let raw = Int(max(0, date.timeIntervalSince(startedAt)) * clipFps)
@@ -240,17 +295,20 @@ struct DinoSpriteView: View {
 
 struct DinoStaticFrame: View {
   let skin: String
+  var growthStage: String = "baby"
   var size: CGFloat = 48
 
   var body: some View {
     #if canImport(UIKit)
-    if let sheet = DinoSpriteCatalog.sheetImage(skin: skin, clip: .idle) {
-      let key = DinoSpriteCatalog.sheetName(skin: skin, clip: .idle)
+    let stage = Growth.effective(growthStage)
+    if let sheet = DinoSpriteCatalog.sheetImage(skin: skin, clip: .idle, stage: stage) {
+      let key = DinoSpriteCatalog.sheetName(skin: skin, clip: .idle, stage: stage)
       Image(uiImage: DinoSpriteCatalog.frameImage(sheetKey: key, sheet: sheet, index: 0))
         .resizable()
         .interpolation(.none)
         .scaledToFit()
         .frame(width: size, height: size)
+        .scaleEffect(Growth.scale(for: stage))
     } else {
       DinoAvatar(skin: skin, size: size)
     }

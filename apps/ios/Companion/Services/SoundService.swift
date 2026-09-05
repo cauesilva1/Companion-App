@@ -35,17 +35,15 @@ enum SoundService {
     switch clip {
     case .crack, .eggMove:
       play("rocks")
-    case .hatch:
+    case .hatch, .evolveBabyTeen, .evolveTeenAdult:
       play("roar")
     case .move, .dash, .jump:
       playStep()
-    case .bite, .kick:
+    case .bite, .kick, .eat, .hurt:
       play("hit")
-    case .hurt:
-      play("hit")
-    case .scan, .avoid:
+    case .scan, .avoid, .look:
       play("growl")
-    case .idle:
+    case .idle, .sleep:
       break
     }
   }

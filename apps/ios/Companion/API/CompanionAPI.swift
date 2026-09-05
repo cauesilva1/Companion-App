@@ -35,6 +35,8 @@ struct CompanionStateDTO: Decodable {
   let affection: Double
   let skin: String?
   let archetype: String?
+  let growthStage: String?
+  let createdAt: String?
 }
 
 struct InteractResponseDTO: Decodable {
@@ -283,7 +285,13 @@ actor CompanionAPI {
   }
 
   private func snapshot(from dto: CompanionStateDTO) -> CompanionSnapshot {
-    CompanionSnapshot(
+    var created: Date?
+    if let raw = dto.createdAt {
+      let iso = ISO8601DateFormatter()
+      iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      created = iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+    }
+    return CompanionSnapshot(
       id: dto.id,
       name: dto.name,
       mood: dto.mood,
@@ -292,7 +300,9 @@ actor CompanionAPI {
       affection: dto.affection,
       skin: dto.skin ?? "dino-mort",
       archetype: dto.archetype ?? "curioso",
-      updatedAt: Date()
+      updatedAt: Date(),
+      growthStage: Growth.normalize(dto.growthStage).rawValue,
+      createdAt: created
     )
   }
 }

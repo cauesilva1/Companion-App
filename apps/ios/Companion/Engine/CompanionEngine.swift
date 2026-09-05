@@ -17,10 +17,27 @@ actor CompanionEngine {
     return created
   }
 
-  /// Cria/substitui o companion a partir do quiz (skin/arquétipo derivados das respostas).
+  /// Cria ou atualiza o companion a partir do quiz (mantém id/histórico se já existir).
   @discardableResult
   func birthFromQuiz(draft: CompanionQuiz.Draft, name: String) -> CompanionSnapshot {
     let now = Date()
+    if var existing = file.companions.first {
+      existing.name = name
+      existing.personality = draft.personality
+      existing.skin = draft.skin
+      existing.archetype = draft.archetype.rawValue
+      existing.mood = .HAPPY
+      existing.lastInteractionAt = now
+      existing.lastDecayAt = now
+      file.companions = [existing]
+      CompanionLocalStore.save(file)
+      CompanionSnapshotStore.saveCompanionId(existing.id)
+      let snap = existing.toSnapshot(moodText: draft.blurb)
+      CompanionSnapshotStore.save(snap)
+      CompanionQuiz.markCompleted()
+      return snap
+    }
+
     let created = StoredCompanion(
       id: CompanionLocalStore.nextId(),
       name: name,
@@ -36,7 +53,10 @@ actor CompanionEngine {
       lastInteractionAt: now,
       pendingAlert: nil,
       memoryNotes: [],
-      userDisplayName: nil
+      userDisplayName: nil,
+      growthStage: "baby",
+      createdAt: now,
+      growthStageAt: now
     )
     file.companions = [created]
     file.interactions = []
@@ -96,7 +116,9 @@ actor CompanionEngine {
         userMessage: message,
         history: history,
         memoryNotes: companion.memoryNotes,
-        weatherHint: nil
+        weatherHint: nil,
+        musicHint: await MainActor.run { NowPlayingService.shared.line },
+        growthStage: Growth.normalize(companion.growthStage).rawValue
       ),
       companionId: companion.id,
       type: type
@@ -108,6 +130,18 @@ actor CompanionEngine {
     companion.lastDecayAt = now
     companion.lastInteractionAt = now
     companion.pendingAlert = nil
+    if companion.createdAt == nil {
+      companion.createdAt = companion.lastInteractionAt
+    }
+    let resolved = Growth.resolve(
+      stageRaw: companion.growthStage,
+      stageStartedAt: companion.growthStageAt,
+      createdAt: companion.createdAt,
+      affection: companion.affection,
+      now: now
+    )
+    companion.growthStage = resolved.stage.rawValue
+    companion.growthStageAt = resolved.stageStartedAt
 
     let interaction = StoredInteraction(
       id: CompanionLocalStore.nextId(prefix: "act"),
@@ -141,6 +175,17 @@ actor CompanionEngine {
     companion.affection = decayed.affection
     companion.mood = decayed.mood
     companion.lastDecayAt = Date()
+    if companion.createdAt == nil {
+      companion.createdAt = companion.lastInteractionAt
+    }
+    let resolved = Growth.resolve(
+      stageRaw: companion.growthStage,
+      stageStartedAt: companion.growthStageAt,
+      createdAt: companion.createdAt,
+      affection: companion.affection
+    )
+    companion.growthStage = resolved.stage.rawValue
+    companion.growthStageAt = resolved.stageStartedAt
     if companion.mood == .LONELY {
       companion.pendingAlert = "\(companion.name) sente sua falta."
     }
@@ -156,15 +201,18 @@ actor CompanionEngine {
   }
 
   private func chatHistory(companionId: String) -> [(role: String, content: String)] {
+    let chats = file.interactions
+      .filter { $0.companionId == companionId && $0.type == .CHAT }
+      .sorted { $0.createdAt < $1.createdAt }
+      .suffix(8)
     var turns: [(role: String, content: String)] = []
-    for item in file.interactions where item.companionId == companionId && item.type == .CHAT {
-      if turns.count >= 10 { break }
+    for item in chats {
       if let user = item.userMessage, !user.isEmpty {
         turns.append(("user", user))
       }
       turns.append(("assistant", item.reactionText))
     }
-    return turns.reversed()
+    return turns
   }
 
   private func extractMemory(from message: String) -> [String] {

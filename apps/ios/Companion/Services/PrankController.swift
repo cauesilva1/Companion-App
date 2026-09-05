@@ -56,6 +56,10 @@ final class PrankController: ObservableObject {
     ambientTask = nil
   }
 
+  func clearLine() {
+    line = nil
+  }
+
   func run(_ kind: PrankKind) async {
     switch kind {
     case .shake:
@@ -104,12 +108,15 @@ final class PrankController: ObservableObject {
       UINotificationFeedbackGenerator().notificationOccurred(.success)
       #endif
     }
+    try? await Task.sleep(nanoseconds: 2_500_000_000)
+    line = nil
   }
 
   func resetVisual() {
     offset = .zero
     scale = 1
     hidden = false
+    line = nil
   }
 
   private func notifyPrank(_ body: String) async {

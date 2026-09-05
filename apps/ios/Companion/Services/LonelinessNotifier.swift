@@ -29,7 +29,7 @@ enum LonelinessNotifier {
   static func check(mood: String, companionName: String) {
     guard isEnabled else { return }
     let upper = mood.uppercased()
-    guard upper == "LONELY" || upper == "SAD" else { return }
+    guard upper == "LONELY" || upper == "SAD" || upper == "SLEEPY" || upper == "BORED" else { return }
 
     let now = Date().timeIntervalSince1970
     let last = UserDefaults.standard.double(forKey: lastSentKey)
@@ -42,9 +42,16 @@ enum LonelinessNotifier {
 
       let content = UNMutableNotificationContent()
       content.title = companionName
-      content.body = upper == "LONELY"
-        ? "Senti sua falta… vem me visitar?"
-        : "Tô meio pra baixo… um poke ajudaria."
+      switch upper {
+      case "LONELY":
+        content.body = "Senti sua falta… vem me visitar?"
+      case "SAD":
+        content.body = "Tô meio pra baixo… um poke ajudaria."
+      case "SLEEPY":
+        content.body = "Com sono… mas queria te ver um pouco."
+      default:
+        content.body = "Meio sem graça aqui… cutuca?"
+      }
       content.sound = .default
 
       let request = UNNotificationRequest(

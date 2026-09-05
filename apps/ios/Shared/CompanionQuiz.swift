@@ -2,20 +2,30 @@ import Foundation
 
 /// Quiz de personalidade — “como você quer viver com o companion”.
 enum CompanionQuiz {
-  static let revision = "companion-life-v1"
+  static let revision = "companion-life-v2"
+  /// Revisões antigas ainda contam como quiz feito (não forçar de novo).
+  private static let acceptedRevisions: Set<String> = ["companion-life-v1", "companion-life-v2"]
   private static let revKey = "companion.quiz.rev"
 
   static var isCompleted: Bool {
-    UserDefaults.standard.string(forKey: revKey) == revision
+    if let rev = UserDefaults.standard.string(forKey: revKey), acceptedRevisions.contains(rev) {
+      return true
+    }
+    // Já tem pet local → não reabre o quiz
+    if !CompanionLocalStore.load().companions.isEmpty { return true }
+    if CompanionSnapshotStore.load() != nil { return true }
+    return false
   }
 
   static func markCompleted() {
     UserDefaults.standard.set(revision, forKey: revKey)
+    CompanionAppGroup.defaults.set(revision, forKey: revKey)
   }
 
   /// Para retestar o quiz (debug / Config).
   static func resetCompleted() {
     UserDefaults.standard.removeObject(forKey: revKey)
+    CompanionAppGroup.defaults.removeObject(forKey: revKey)
   }
 
   enum Archetype: String, CaseIterable {
@@ -115,21 +125,31 @@ enum CompanionQuiz {
     .misterioso: "Vesper",
   ]
 
-  private static let blurbs: [Archetype: String] = [
-    .curioso: "Nasceu o Doux — amarelo, perguntão, sempre no seu pé.",
-    .preguicoso: "Nasceu o Olaf — azul, lento, e com opinião sobre tudo.",
-    .carinhoso: "Nasceu a Vita — verde, colada em você.",
-    .zoeiro: "Nasceu o Mort — rosa, dramático, pronto pra zoar.",
-    .misterioso: "Nasceu o Kuro — escuro, calado, observando.",
+  /// Todas as skins do pack Arks — a aparência é sorteada; o arquétipo vem do quiz.
+  static let allSkins: [String] = [
+    "dino-doux", "dino-vita", "dino-olaf", "dino-mort", "dino-kuro",
+    "dino-cole", "dino-kira", "dino-loki", "dino-mono", "dino-nico",
+    "dino-sena", "dino-tard",
   ]
 
-  private static let skinByArch: [Archetype: String] = [
-    .curioso: "dino-doux",
-    .preguicoso: "dino-olaf",
-    .carinhoso: "dino-vita",
-    .zoeiro: "dino-mort",
-    .misterioso: "dino-kuro",
+  private static let skinDisplayName: [String: String] = [
+    "dino-doux": "Doux", "dino-vita": "Vita", "dino-olaf": "Olaf",
+    "dino-mort": "Mort", "dino-kuro": "Kuro", "dino-cole": "Cole",
+    "dino-kira": "Kira", "dino-loki": "Loki", "dino-mono": "Mono",
+    "dino-nico": "Nico", "dino-sena": "Sena", "dino-tard": "Tard",
   ]
+
+  private static let archTone: [Archetype: String] = [
+    .curioso: "perguntão, sempre no seu pé",
+    .preguicoso: "lento, e com opinião sobre tudo",
+    .carinhoso: "colado em você",
+    .zoeiro: "dramático, pronto pra zoar",
+    .misterioso: "calado, observando",
+  ]
+
+  static func randomSkin() -> String {
+    allSkins.randomElement() ?? "dino-mort"
+  }
 
   static func derive(choices: [Int]) -> Draft {
     var scores: [Archetype: Int] = Dictionary(uniqueKeysWithValues: Archetype.allCases.map { ($0, 0) })
@@ -141,12 +161,15 @@ enum CompanionQuiz {
       }
     }
     let arch = scores.max(by: { $0.value < $1.value })?.key ?? .curioso
+    let skin = randomSkin()
+    let dino = skinDisplayName[skin] ?? "Companion"
+    let tone = archTone[arch] ?? arch.rawValue
     return Draft(
       name: names[arch] ?? "Companion",
       personality: personality[arch] ?? arch.rawValue,
-      skin: skinByArch[arch] ?? "dino-mort",
+      skin: skin,
       archetype: arch,
-      blurb: blurbs[arch] ?? ""
+      blurb: "Nasceu o \(dino) — \(tone)."
     )
   }
 }

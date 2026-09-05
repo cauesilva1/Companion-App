@@ -54,12 +54,14 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "electron": "31.7.7",
     "electron-builder": "^24.0.0",
     "typescript": "^5.5.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.115.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "ws": "^8.21.3"
   }
 }

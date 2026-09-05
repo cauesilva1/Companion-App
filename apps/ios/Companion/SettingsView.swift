@@ -58,15 +58,27 @@ struct SettingsView: View {
         Text("Conta")
           .font(.headline)
           .foregroundStyle(CompanionTheme.title)
-        Text(SupabaseConfig.isConfigured ? "Cloud pronto (embutido no app)." : "Cloud não configurado neste build.")
+        Text(SupabaseConfig.isConfigured
+          ? "Cloud automático: sessão salva no aparelho (sem pedir login)."
+          : "Cloud não configurado neste build.")
           .font(.caption)
           .foregroundStyle(CompanionTheme.subtitle)
         if model.isLoggedIn {
           Text(model.accountEmail)
             .font(.subheadline)
             .foregroundStyle(CompanionTheme.subtitle)
-          Button("Sair da conta") { model.logout() }
-            .foregroundStyle(.red)
+          if model.accountEmail == "convidado" {
+            Text("Convidado neste iPhone. Opcional: vincular email para o mesmo pet no Mac.")
+              .font(.caption2)
+              .foregroundStyle(CompanionTheme.subtitle)
+            NavigationLink("Vincular email / senha") {
+              LoginView(model: model)
+            }
+            .font(.subheadline.weight(.bold))
+          } else {
+            Button("Sair da conta") { model.logout() }
+              .foregroundStyle(.red)
+          }
         } else {
           NavigationLink("Entrar / criar conta") {
             LoginView(model: model)
@@ -131,6 +143,17 @@ struct SettingsView: View {
         ))
         .foregroundStyle(CompanionTheme.title)
         .tint(CompanionTheme.play)
+        Toggle("Evolução (beta)", isOn: Binding(
+          get: { model.growthEnabled },
+          set: { model.setGrowthEnabled($0) }
+        ))
+        .foregroundStyle(CompanionTheme.title)
+        .tint(CompanionTheme.play)
+        Text(model.growthEnabled
+          ? "Ligado: stages baby→teen→adult (arte ainda em teste)."
+          : "Desligado: só a forma base. Recomendado por enquanto.")
+          .font(.caption2)
+          .foregroundStyle(CompanionTheme.subtitle)
         Toggle("Avisar energia baixa", isOn: Binding(
           get: { model.lowEnergyNotifEnabled },
           set: { on in Task { await model.setLowEnergyNotif(on) } }

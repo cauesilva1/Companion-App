@@ -87,6 +87,13 @@ body[data-skin-tint="dino-vita"] { --dino-tint: #34d399; }
 body[data-skin-tint="dino-olaf"] { --dino-tint: #60a5fa; }
 body[data-skin-tint="dino-mort"] { --dino-tint: #fb7185; }
 body[data-skin-tint="dino-kuro"] { --dino-tint: #7c3aed; }
+body[data-skin-tint="dino-cole"] { --dino-tint: #a78bfa; }
+body[data-skin-tint="dino-kira"] { --dino-tint: #f472b6; }
+body[data-skin-tint="dino-loki"] { --dino-tint: #3b82f6; }
+body[data-skin-tint="dino-mono"] { --dino-tint: #94a3b8; }
+body[data-skin-tint="dino-nico"] { --dino-tint: #d97706; }
+body[data-skin-tint="dino-sena"] { --dino-tint: #8b5cf6; }
+body[data-skin-tint="dino-tard"] { --dino-tint: #ca8a04; }
 
 body.expanded {
   --win-w: 520px;

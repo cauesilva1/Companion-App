@@ -5,6 +5,7 @@ import { applyTimeDecay, applyInteraction } from "../moodEngine";
 import { generateReaction, isBadReaction } from "../llm";
 import { computeAlert, moodText } from "../companionStatus";
 import { localGreeting, localReaction, suggestPrank } from "../localVoice";
+import { normalizeGrowthStage, shouldEvolve } from "../growth";
 import {
   loadStore,
   saveStore,
@@ -36,13 +37,46 @@ function runtime(row: StoredCompanion): RuntimeCompanion {
   return toCompanion(row);
 }
 
+function createdAtOf(companion: RuntimeCompanion): Date {
+  if (companion.createdAt instanceof Date) return companion.createdAt;
+  if (typeof companion.createdAt === "string") return new Date(companion.createdAt);
+  return companion.lastInteractionAt;
+}
+
+function stageStartedAtOf(companion: RuntimeCompanion): Date {
+  if (companion.growthStageAt instanceof Date) return companion.growthStageAt;
+  return createdAtOf(companion);
+}
+
+/** Apply evolve if due; mutates companion growth fields. */
+function applyGrowth(companion: RuntimeCompanion, affection: number, now: Date) {
+  const stage = normalizeGrowthStage(companion.growthStage);
+  const next = shouldEvolve({
+    stage,
+    stageStartedAt: stageStartedAtOf(companion),
+    affection,
+    now,
+  });
+  if (next) {
+    companion.growthStage = next;
+    companion.growthStageAt = now;
+  } else {
+    companion.growthStage = stage;
+    if (!companion.growthStageAt) companion.growthStageAt = stageStartedAtOf(companion);
+  }
+}
+
 function writeBack(companion: RuntimeCompanion) {
   const idx = file.companions.findIndex((c) => c.id === companion.id);
+  const createdIso = createdAtOf(companion).toISOString();
+  const stageAtIso = stageStartedAtOf(companion).toISOString();
   const row: StoredCompanion = {
     id: companion.id,
     name: companion.name,
     personality: companion.personality,
     skin: companion.skin,
+    growthStage: normalizeGrowthStage(companion.growthStage),
+    growthStageAt: stageAtIso,
     artStyle: companion.artStyle,
     backdrop: companion.backdrop,
     archetype: companion.archetype,
@@ -54,6 +88,7 @@ function writeBack(companion: RuntimeCompanion) {
     pendingAlert: companion.pendingAlert,
     memoryNotes: companion.memoryNotes,
     userDisplayName: companion.userDisplayName,
+    createdAt: createdIso,
   };
   if (idx >= 0) file.companions[idx] = row;
   else file.companions.push(row);
@@ -121,12 +156,15 @@ function statePayload(companion: RuntimeCompanion) {
   companion.pendingAlert = undefined;
   const hour = new Date().getHours();
   const greeting = localGreeting(companion.archetype, hour);
+  applyGrowth(companion, companion.affection, new Date());
   writeBack(companion);
   return {
     id: companion.id,
     name: companion.name,
     personality: companion.personality,
     skin: companion.skin,
+    growthStage: normalizeGrowthStage(companion.growthStage),
+    growthStageAt: stageStartedAtOf(companion),
     artStyle: companion.artStyle,
     backdrop: companion.backdrop,
     archetype: companion.archetype,
@@ -134,6 +172,7 @@ function statePayload(companion: RuntimeCompanion) {
     affection: companion.affection,
     energy: companion.energy,
     lastInteractionAt: companion.lastInteractionAt,
+    createdAt: createdAtOf(companion),
     moodText: moodText(companion.name, companion.mood),
     greeting,
     alert,
@@ -172,6 +211,8 @@ mockRouter.post("/", (req, res) => {
     name: parsed.data.name,
     personality: parsed.data.personality ?? "curioso",
     skin: parsed.data.skin ?? "blob",
+    growthStage: "baby",
+    growthStageAt: now,
     artStyle: parsed.data.artStyle ?? "cartoon",
     backdrop: parsed.data.backdrop ?? "bedroom",
     archetype: parsed.data.archetype ?? "curioso",
@@ -180,6 +221,7 @@ mockRouter.post("/", (req, res) => {
     affection: 50,
     lastDecayAt: now,
     lastInteractionAt: now,
+    createdAt: now,
   };
   file.companions.push(companion);
   persist();
@@ -226,6 +268,7 @@ const interactSchema = z.object({
   rememberChats: z.boolean().optional(),
   trackTitle: z.string().max(120).optional(),
   screenHint: z.string().max(160).optional(),
+  growthEnabled: z.boolean().optional(),
 });
 
 mockRouter.post("/:id/interact", async (req, res) => {
@@ -264,6 +307,7 @@ mockRouter.post("/:id/interact", async (req, res) => {
         personality: companion.personality,
         archetype: companion.archetype,
         artStyle: companion.artStyle,
+        growthStage: normalizeGrowthStage(companion.growthStage),
       },
       type: parsed.data.type as any,
       mood: result.mood,
@@ -273,6 +317,8 @@ mockRouter.post("/:id/interact", async (req, res) => {
       history,
       memoryNotes: remember ? companion.memoryNotes : undefined,
       screenHint: parsed.data.screenHint,
+      musicHint: parsed.data.trackTitle,
+      growthEnabled: parsed.data.growthEnabled,
     },
     companion.id
   );
@@ -284,6 +330,7 @@ mockRouter.post("/:id/interact", async (req, res) => {
       mood: result.mood,
       type: parsed.data.type as any,
       userMessage: parsed.data.message,
+      growthStage: companion.growthStage,
     });
   }
 
@@ -299,6 +346,7 @@ mockRouter.post("/:id/interact", async (req, res) => {
   companion.lastDecayAt = now;
   companion.lastInteractionAt = now;
   companion.pendingAlert = undefined;
+  applyGrowth(companion, result.affection, now);
 
   const interaction: StoredInteraction = {
     id: nextId("act"),
@@ -324,6 +372,8 @@ mockRouter.post("/:id/interact", async (req, res) => {
       artStyle: companion.artStyle,
       backdrop: companion.backdrop,
       skin: companion.skin,
+      growthStage: normalizeGrowthStage(companion.growthStage),
+      growthStageAt: stageStartedAtOf(companion),
       archetype: companion.archetype,
       moodText: moodText(companion.name, companion.mood),
       memoryNotes: companion.memoryNotes ?? [],

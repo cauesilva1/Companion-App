@@ -59,10 +59,7 @@ final class NowPlayingService: ObservableObject {
   func stop() {
     timer?.invalidate()
     timer = nil
-    title = nil
-    artist = nil
-    isPlaying = false
-    companionLine = nil
+    clearTrack(reloadWidget: true)
     source = "—"
   }
 
@@ -83,21 +80,45 @@ final class NowPlayingService: ObservableObject {
   func refreshAsync() async {
     guard Self.isEnabled else { return }
 
-    if SpotifyService.shared.isConnected,
-       let track = await SpotifyService.shared.currentlyPlaying(),
-       !track.title.isEmpty {
-      apply(title: track.title, artist: track.artist, playing: track.isPlaying, source: "Spotify")
+    guard SpotifyService.shared.isConnected else {
+      clearTrack(reloadWidget: title != nil)
+      source = "Conecte o Spotify"
       return
     }
 
-    // Sem Spotify conectado / nada tocando
-    if title != nil {
-      // mantém última faixa se API voltar 204 (pausa), só marca pause
-      isPlaying = false
-      source = SpotifyService.shared.isConnected ? "Spotify (pausado)" : "Conecte o Spotify"
-    } else {
-      source = SpotifyService.shared.isConnected ? "Spotify" : "Conecte o Spotify"
+    switch await SpotifyService.shared.currentlyPlaying() {
+    case .track(let track) where !track.title.isEmpty:
+      apply(
+        title: track.title,
+        artist: track.artist,
+        playing: track.isPlaying,
+        source: track.isPlaying ? "Spotify" : "Spotify (pausado)"
+      )
+    case .idle:
+      // 204 / sem item = fechou o player → limpa app + widget
+      clearTrack(reloadWidget: true)
+      source = "Spotify"
+    case .track, .unavailable:
+      // Rede/erro: não apaga a última faixa conhecida
+      if title != nil {
+        isPlaying = false
+        source = "Spotify (pausado)"
+      } else {
+        source = "Spotify"
+      }
     }
+  }
+
+  private func clearTrack(reloadWidget: Bool) {
+    let had = title != nil
+    title = nil
+    artist = nil
+    isPlaying = false
+    companionLine = nil
+    lastNotifiedKey = nil
+    guard reloadWidget, had else { return }
+    WidgetSpeechStore.clearMusic()
+    WidgetReloader.reload()
   }
 
   private func apply(title nextTitle: String, artist nextArtist: String?, playing: Bool, source label: String) {
@@ -119,18 +140,36 @@ final class NowPlayingService: ObservableObject {
     guard key != lastNotifiedKey else { return }
     lastNotifiedKey = key
 
-    let arch = CompanionSnapshotStore.load()?.archetype ?? "curioso"
-    let line = LocalVoice.musicLine(title: title, artist: artist, archetype: arch)
-    companionLine = line
+    let snap = CompanionSnapshotStore.load()
+    let arch = snap?.archetype ?? "curioso"
+
+    Task {
+      let stored = CompanionLocalStore.load().companions.first
+      let line = await LLMService.musicComment(
+        title: title,
+        artist: artist,
+        name: snap?.name ?? stored?.name ?? "Companion",
+        archetype: arch,
+        personality: stored?.personality ?? "amigável"
+      )
+      guard self.trackKey == key else { return }
+      self.companionLine = line
+      self.publish(line: line, title: title, artist: artist)
+      let name = snap?.name ?? stored?.name ?? "Companion"
+      WidgetSpeechStore.saveMusic(title: title, artist: artist, comment: line, name: name)
+      WidgetReloader.reload()
+      if Self.musicNotificationsEnabled {
+        await MusicTrackNotifier.notify(title: title, artist: artist, body: line)
+      }
+    }
+  }
+
+  private func publish(line: String, title: String, artist: String?) {
     NotificationCenter.default.post(
       name: .companionNowPlayingChanged,
       object: nil,
       userInfo: ["line": line, "title": title, "artist": artist ?? ""]
     )
-
-    if Self.musicNotificationsEnabled {
-      Task { await MusicTrackNotifier.notify(title: title, artist: artist, body: line) }
-    }
   }
 }
 

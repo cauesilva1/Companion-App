@@ -97,12 +97,43 @@ const NAMES: Record<Archetype, string> = {
   misterioso: "Vesper",
 };
 
-const DINO_BLURB: Record<Archetype, string> = {
-  curioso: "Nasceu o Doux — amarelo, perguntão, sempre no seu pé.",
-  preguicoso: "Nasceu o Olaf — azul, lento, e com opinião sobre tudo.",
-  carinhoso: "Nasceu a Vita — verde, colada em você.",
-  zoeiro: "Nasceu o Mort — rosa, dramático, pronto pra zoar.",
-  misterioso: "Nasceu o Kuro — escuro, calado, observando.",
+/** Todas as skins do pack — aparência sorteada; arquétipo vem do quiz. */
+const ALL_SKINS = [
+  "dino-doux",
+  "dino-vita",
+  "dino-olaf",
+  "dino-mort",
+  "dino-kuro",
+  "dino-cole",
+  "dino-kira",
+  "dino-loki",
+  "dino-mono",
+  "dino-nico",
+  "dino-sena",
+  "dino-tard",
+] as const;
+
+const SKIN_DISPLAY: Record<string, string> = {
+  "dino-doux": "Doux",
+  "dino-vita": "Vita",
+  "dino-olaf": "Olaf",
+  "dino-mort": "Mort",
+  "dino-kuro": "Kuro",
+  "dino-cole": "Cole",
+  "dino-kira": "Kira",
+  "dino-loki": "Loki",
+  "dino-mono": "Mono",
+  "dino-nico": "Nico",
+  "dino-sena": "Sena",
+  "dino-tard": "Tard",
+};
+
+const ARCH_TONE: Record<Archetype, string> = {
+  curioso: "perguntão, sempre no seu pé",
+  preguicoso: "lento, e com opinião sobre tudo",
+  carinhoso: "colado em você",
+  zoeiro: "dramático, pronto pra zoar",
+  misterioso: "calado, observando",
 };
 
 function pickMax<T extends string>(scores: Record<T, number>, fallback: T): T {
@@ -117,6 +148,10 @@ function pickMax<T extends string>(scores: Record<T, number>, fallback: T): T {
   return best;
 }
 
+function randomSkin(): string {
+  return ALL_SKINS[Math.floor(Math.random() * ALL_SKINS.length)] ?? "dino-mort";
+}
+
 function deriveCompanion(choices: number[]): CompanionDraft {
   const archetype: Record<Archetype, number> = { curioso: 0, preguicoso: 0, carinhoso: 0, zoeiro: 0, misterioso: 0 };
 
@@ -127,22 +162,17 @@ function deriveCompanion(choices: number[]): CompanionDraft {
   });
 
   const arch = pickMax(archetype, "curioso");
-  const skinByArch: Record<Archetype, string> = {
-    curioso: "dino-doux",
-    preguicoso: "dino-olaf",
-    carinhoso: "dino-vita",
-    zoeiro: "dino-mort",
-    misterioso: "dino-kuro",
-  };
+  const skin = randomSkin();
+  const dino = SKIN_DISPLAY[skin] ?? "Companion";
 
   return {
     name: NAMES[arch],
     personality: PERSONALITY[arch],
-    skin: skinByArch[arch],
+    skin,
     artStyle: "pixel",
     backdrop: "sky",
     archetype: arch,
-    blurb: DINO_BLURB[arch],
+    blurb: `Nasceu o ${dino} — ${ARCH_TONE[arch]}.`,
   };
 }
 
@@ -151,6 +181,7 @@ interface CompanionState {
   name: string;
   personality: string;
   skin: string;
+  growthStage?: string;
   artStyle?: string;
   backdrop?: string;
   archetype?: string;
@@ -158,6 +189,7 @@ interface CompanionState {
   affection: number;
   energy?: number;
   lastInteractionAt: string | null;
+  createdAt?: string;
   moodText?: string;
   alert?: string;
   greeting?: string;
@@ -181,9 +213,11 @@ interface CompanionSettings {
   useWindowTitle?: boolean;
   commentMedia?: boolean;
   screenVision?: boolean;
+  growthEnabled?: boolean;
   streakCount?: number;
   missions?: {
     day?: string;
+    dayLabel?: string;
     items?: Array<{
       id: string;
       kind: string;
@@ -198,6 +232,7 @@ interface CompanionSettings {
   screenApp?: string;
   authEmail?: string;
   loggedIn?: boolean;
+  isAnonymous?: boolean;
   apiUrl?: string;
   supabaseConfigured?: boolean;
 }
@@ -260,10 +295,18 @@ interface CompanionWindow {
     createCompanion: (body: object) => Promise<IpcResult<CompanionState>>;
     login: (email: string, password: string) => Promise<IpcResult<{ email?: string; companionId?: string }>>;
     register: (email: string, password: string) => Promise<IpcResult<{ email?: string }>>;
+    resetPassword: (email: string) => Promise<IpcResult<Record<string, never>>>;
     logout: () => Promise<{ ok: boolean }>;
     getSession: () => Promise<CompanionSettings>;
     getSettings: () => Promise<CompanionSettings>;
     setSettings: (patch: object) => Promise<CompanionSettings>;
+    claimMission: (idOrKind: string) => Promise<{
+      missions?: CompanionSettings["missions"];
+      rewardEnergy?: number;
+      rewardAffection?: number;
+      energy?: number;
+      affection?: number;
+    } | null>;
     setQuizMode: (on: boolean) => Promise<void>;
     setCompact: (on: boolean) => Promise<{ compact: boolean }>;
     setHabitat: (on: boolean) => Promise<{ habitat: boolean }>;
@@ -415,11 +458,12 @@ function applySky(tod?: string) {
 }
 
 function playClipSfx(clip: string) {
-  if (clip === "crack") playSfx("rocks");
-  else if (clip === "hatch") playSfx("roar");
+  if (clip === "crack" || clip === "eggMove") playSfx("rocks");
+  else if (clip === "hatch" || clip === "evolveBabyTeen" || clip === "evolveTeenAdult") playSfx("roar");
   else if (clip === "move" || clip === "dash" || clip === "jump") playSfx(`step${1 + Math.floor(Math.random() * 4)}`);
-  else if (clip === "bite" || clip === "kick") playSfx("hit");
-  else if (clip === "hurt" || clip === "scan") playSfx(clip === "hurt" ? "hit" : "growl");
+  else if (clip === "bite" || clip === "kick" || clip === "eat") playSfx("hit");
+  else if (clip === "hurt") playSfx("hit");
+  else if (clip === "scan" || clip === "look" || clip === "avoid") playSfx("growl");
 }
 
 const PLAY_CLIPS = ["jump", "move", "dash", "bite", "kick"] as const;
@@ -429,6 +473,14 @@ const PLAY_LINES: Record<string, string[]> = {
   carinhoso: ["Brinca comigo!", "Corre pra cá — eu te espero.", "Pula e me dá colo depois."],
   zoeiro: ["Olha o show!", "Dash dramático ativado.", "Mordida de brincadeira. Relaxa."],
   misterioso: ["Um passo. Sem explicação.", "Dash na sombra.", "O jogo começa sem palavras."],
+};
+/** POKE → avoid: desvia com frasezinha. */
+const POKE_LINES: Record<string, string[]> = {
+  curioso: ["Ops — desviei! O que você queria testar?", "Quase! Reflexo científico."],
+  preguicoso: ["Nem com esforço. Desviei deitado.", "Ugh. Cutucada rejeitada."],
+  carinhoso: ["Hehe, errou o carinho!", "Desviei… mas ainda te amo."],
+  zoeiro: ["Ha! Errou feio.", "Nem toca. Eu sou ninja."],
+  misterioso: ["Você tocou o ar.", "Eu já não estava ali."],
 };
 
 let ambientTimer: ReturnType<typeof setTimeout> | null = null;
@@ -447,7 +499,8 @@ function scheduleAmbientLife() {
   const excited = lastMood === "EXCITED";
   const sleepy = lastMood === "SLEEPY";
   if (sleepy) return;
-  const delay = (excited ? 6000 : 9000) + Math.floor(Math.random() * (excited ? 4000 : 6000));
+  // Mais espaçado: menos spam de dash, mais “vivo” sem nervoso
+  const delay = (excited ? 8000 : 12000) + Math.floor(Math.random() * (excited ? 5000 : 8000));
   ambientTimer = setTimeout(() => {
     ambientTimer = null;
     if (document.body.classList.contains("quiz-open")) return;
@@ -456,7 +509,10 @@ function scheduleAmbientLife() {
       scheduleAmbientLife();
       return;
     }
-    const clip = Math.random() < 0.55 ? "move" : "dash";
+    const roll = Math.random();
+    // Só clips que existem no pack Arks `base/` (look/eat Gemini ficam de fora)
+    const clip =
+      roll < 0.5 ? "move" : roll < 0.72 ? "jump" : roll < 0.88 ? "scan" : "dash";
     void dinoPlay(clip, false);
     playClipSfx(clip);
     scheduleAmbientLife();
@@ -509,24 +565,52 @@ let activeSkinId = "dino-doux";
 let activeSkin: SkinView | null = null;
 let companionIdForHatch = "";
 
-type DinoClip = { file: string; fps: number };
+type GrowthStage = "baby" | "teen" | "adult";
 
+let growthStage: GrowthStage = "baby";
+let growthVisualsEnabled = false;
+let evolving = false;
+
+function normalizeGrowthStage(raw: unknown): GrowthStage {
+  const s = String(raw ?? "baby").toLowerCase();
+  if (s === "teen" || s === "adult" || s === "baby") return s;
+  return "baby";
+}
+
+function growthScale(stage: GrowthStage): number {
+  // Growth visuals paused — escala normal do app atual
+  void stage;
+  return 1;
+}
+
+type DinoClip = { file: string; fps: number; stageAware?: boolean };
+
+/** Clip → filename. Stage-aware clips live in baby|teen|adult/; eggs stay in egg/. */
+/** Clip → filename. Stage-aware clips live in baby|teen|adult/; eggs stay in egg/.
+ * FPS calibrados para packs Arks (3–6 frames): mais lentos = menos “piscado”.
+ */
 const DINO_CLIPS: Record<string, DinoClip> = {
-  idle: { file: "base/idle.png", fps: 5 },
-  move: { file: "base/move.png", fps: 10 },
-  jump: { file: "base/jump.png", fps: 8 },
-  dash: { file: "base/dash.png", fps: 12 },
-  hurt: { file: "base/hurt.png", fps: 10 },
-  kick: { file: "base/kick.png", fps: 10 },
-  bite: { file: "base/bite.png", fps: 10 },
-  scan: { file: "base/scan.png", fps: 8 },
-  avoid: { file: "base/avoid.png", fps: 6 },
-  eggMove: { file: "egg/move.png", fps: 6 },
-  crack: { file: "egg/crack.png", fps: 7 },
-  hatch: { file: "egg/hatch.png", fps: 7 },
+  idle: { file: "idle.png", fps: 4, stageAware: true },
+  move: { file: "move.png", fps: 8, stageAware: true },
+  jump: { file: "jump.png", fps: 7, stageAware: true },
+  dash: { file: "dash.png", fps: 10, stageAware: true },
+  hurt: { file: "hurt.png", fps: 8, stageAware: true },
+  kick: { file: "kick.png", fps: 8, stageAware: true },
+  bite: { file: "bite.png", fps: 8, stageAware: true },
+  scan: { file: "scan.png", fps: 7, stageAware: true },
+  avoid: { file: "avoid.png", fps: 5, stageAware: true },
+  sleep: { file: "sleep.png", fps: 3, stageAware: true },
+  look: { file: "look.png", fps: 4, stageAware: true },
+  eat: { file: "eat.png", fps: 6, stageAware: true },
+  eggMove: { file: "egg/move.png", fps: 5 },
+  crack: { file: "egg/crack.png", fps: 6 },
+  hatch: { file: "egg/hatch.png", fps: 6 },
+  evolveBabyTeen: { file: "evolve-baby-teen.png", fps: 5 },
+  evolveTeenAdult: { file: "evolve-teen-adult.png", fps: 5 },
 };
 
 const sheetCache = new Map<string, HTMLImageElement>();
+const sheetMissing = new Set<string>();
 
 function dinoFolder(skin: SkinView | null): string | null {
   if (!skin) return null;
@@ -535,7 +619,33 @@ function dinoFolder(skin: SkinView | null): string | null {
   return null;
 }
 
+function clipCandidates(folder: string, clip: string): string[] {
+  const spec = DINO_CLIPS[clip] ?? DINO_CLIPS.idle;
+  if (!spec.stageAware) {
+    return [`assets/dinos/${folder}/${spec.file}`];
+  }
+  // Growth visuals paused: Arks base/ only (teen/adult Gemini ainda escuro).
+  const GROWTH_VISUALS = growthVisualsEnabled;
+  if (!GROWTH_VISUALS || clip === "evolveBabyTeen" || clip === "evolveTeenAdult") {
+    if (clip === "evolveBabyTeen" || clip === "evolveTeenAdult") {
+      return []; // não tocar evolve por enquanto
+    }
+    // Prefer base for stageAware when growth off; for look without base, try baby then fail gracefully
+    return [
+      `assets/dinos/${folder}/base/${spec.file}`,
+      `assets/dinos/${folder}/baby/${spec.file}`,
+    ];
+  }
+  const stageDir = growthStage;
+  return [
+    `assets/dinos/${folder}/${stageDir}/${spec.file}`,
+    `assets/dinos/${folder}/base/${spec.file}`,
+    `assets/dinos/${folder}/baby/${spec.file}`,
+  ];
+}
+
 function loadSheet(src: string): Promise<HTMLImageElement> {
+  if (sheetMissing.has(src)) return Promise.reject(new Error(src));
   const hit = sheetCache.get(src);
   if (hit && hit.complete && hit.naturalWidth) return Promise.resolve(hit);
   return new Promise((resolve, reject) => {
@@ -544,9 +654,23 @@ function loadSheet(src: string): Promise<HTMLImageElement> {
       sheetCache.set(src, img);
       resolve(img);
     };
-    img.onerror = () => reject(new Error(src));
+    img.onerror = () => {
+      sheetMissing.add(src);
+      reject(new Error(src));
+    };
     img.src = src;
   });
+}
+
+async function loadClipSheet(folder: string, clip: string): Promise<HTMLImageElement | null> {
+  for (const src of clipCandidates(folder, clip)) {
+    try {
+      return await loadSheet(src);
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
 }
 
 interface DinoPlayerState {
@@ -583,19 +707,34 @@ function drawDinoFrame(img: HTMLImageElement, frame: number) {
   const fw = fh;
   const frames = Math.max(1, Math.floor(img.naturalWidth / fw));
   const i = ((frame % frames) + frames) % frames;
+  const scale = growthScale(growthStage);
   for (const canvas of dinoCanvases()) {
     const ctx = canvas.getContext("2d");
     if (!ctx) continue;
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const pad = 8;
-    const size = canvas.width - pad * 2;
-    ctx.drawImage(img, i * fw, 0, fw, fh, pad, pad, size, size);
+    const size = (canvas.width - pad * 2) * scale;
+    const ox = (canvas.width - size) / 2;
+    // Ancora no chão: sheets curtos (sleep) não flutuam no centro
+    const oy = canvas.height - pad - size;
+    ctx.drawImage(img, i * fw, 0, fw, fh, ox, oy, size, size);
   }
 }
 
+/** Idle/sleep com poucos frames: 0→n→0 em vez de hard loop (menos “robótico”). */
+function pingPongIndex(tick: number, frames: number): number {
+  if (frames <= 2) return ((tick % frames) + frames) % frames;
+  const cycle = (frames - 1) * 2;
+  const t = ((tick % cycle) + cycle) % cycle;
+  return t < frames ? t : cycle - t;
+}
+
+let tickSheet: HTMLImageElement | null = null;
+let tickSheetClip = "";
+
 async function dinoPlay(clip: string, loop: boolean, enqueue = false) {
-  if (enqueue && dinoPlayer.clip !== "idle") {
+  if (enqueue && dinoPlayer.clip !== "idle" && dinoPlayer.clip !== "sleep") {
     dinoPlayer.queue.push(clip);
     return;
   }
@@ -603,9 +742,13 @@ async function dinoPlay(clip: string, loop: boolean, enqueue = false) {
   dinoPlayer.loop = loop;
   dinoPlayer.frame = 0;
   dinoPlayer.acc = 0;
+  // força reload do sheet no próximo tick
+  tickSheetClip = "";
+  tickSheet = null;
 }
 
-function dinoIdleByMood(_mood: string) {
+function dinoIdleByMood(mood: string) {
+  if (mood === "SLEEPY") return dinoPlay("sleep", true);
   return dinoPlay("idle", true);
 }
 
@@ -615,62 +758,105 @@ async function dinoTick(ts: number) {
     dinoRaf = 0;
     return;
   }
-  // Idle: ~10 fps; clips de ação mantêm fps do sheet
-  if (dinoPlayer.clip === "idle") {
-    const minDt = 1000 / 10;
-    if (lastDinoTs && ts - lastDinoTs < minDt) {
-      dinoRaf = requestAnimationFrame(dinoTick);
+
+  if (tickSheetClip !== dinoPlayer.clip || !tickSheet) {
+    const loaded = await loadClipSheet(dinoPlayer.folder, dinoPlayer.clip);
+    if (!dinoPlayer.running || document.hidden) return;
+    if (!loaded) {
+      if (dinoPlayer.clip !== "idle") {
+        // eat/look podem faltar em base/ → cai no idle sem travar
+        void dinoIdleByMood(lastMood);
+      }
+      if (dinoPlayer.running && !document.hidden) dinoRaf = requestAnimationFrame(dinoTick);
       return;
     }
+    tickSheet = loaded;
+    tickSheetClip = dinoPlayer.clip;
   }
-  const spec = DINO_CLIPS[dinoPlayer.clip] ?? DINO_CLIPS.idle;
-  const src = `assets/dinos/${dinoPlayer.folder}/${spec.file}`;
-  let img: HTMLImageElement;
-  try {
-    img = await loadSheet(src);
-  } catch {
-    if (dinoPlayer.running && !document.hidden) dinoRaf = requestAnimationFrame(dinoTick);
-    return;
-  }
-  if (!dinoPlayer.running || document.hidden) return;
-  const dt = lastDinoTs ? (ts - lastDinoTs) / 1000 : 0;
+
+  const img = tickSheet;
+  const dt = lastDinoTs ? Math.min(0.05, (ts - lastDinoTs) / 1000) : 0;
   lastDinoTs = ts;
+
+  const spec = DINO_CLIPS[dinoPlayer.clip] ?? DINO_CLIPS.idle;
   const fh = img.naturalHeight || 24;
   const frames = Math.max(1, Math.floor(img.naturalWidth / fh));
-  const fps = lastMood === "SLEEPY" && dinoPlayer.clip === "idle" ? 2 : spec.fps;
+  let fps = spec.fps;
+  if (lastMood === "SLEEPY" && (dinoPlayer.clip === "idle" || dinoPlayer.clip === "sleep")) {
+    fps = Math.min(fps, 2.5);
+  }
+
   dinoPlayer.acc += dt;
-  const frameDur = 1 / fps;
-  if (dinoPlayer.acc >= frameDur) {
-    dinoPlayer.acc = 0;
+  const frameDur = 1 / Math.max(0.5, fps);
+  while (dinoPlayer.acc >= frameDur) {
+    dinoPlayer.acc -= frameDur;
     dinoPlayer.frame += 1;
-    if (dinoPlayer.frame >= frames) {
-      if (dinoPlayer.loop) {
-        dinoPlayer.frame = 0;
-      } else if (dinoPlayer.queue.length) {
-        const next = dinoPlayer.queue.shift()!;
-        dinoPlayer.clip = next;
-        dinoPlayer.loop = next === "idle";
-        dinoPlayer.frame = 0;
-        playClipSfx(next);
-        if (next === "idle" && companionIdForHatch) {
-          try {
-            localStorage.setItem(hatchKey(), "1");
-          } catch {
-            /* ignore */
-          }
-          hatchInProgress = false;
-          pendingHatch = false;
+  }
+
+  const pingPong =
+    dinoPlayer.loop && (dinoPlayer.clip === "idle" || dinoPlayer.clip === "sleep") && frames >= 3;
+
+  if (!dinoPlayer.loop && dinoPlayer.frame >= frames) {
+    if (dinoPlayer.queue.length) {
+      const next = dinoPlayer.queue.shift()!;
+      dinoPlayer.clip = next;
+      dinoPlayer.loop = next === "idle" || next === "sleep";
+      dinoPlayer.frame = 0;
+      dinoPlayer.acc = 0;
+      tickSheet = null;
+      tickSheetClip = "";
+      playClipSfx(next);
+      if (next === "idle" && companionIdForHatch) {
+        try {
+          localStorage.setItem(hatchKey(), "1");
+        } catch {
+          /* ignore */
         }
-        if (next === "idle") scheduleAmbientLife();
-      } else {
-        void dinoIdleByMood(lastMood);
         hatchInProgress = false;
+        pendingHatch = false;
+      }
+      if (next === "idle" || next === "sleep") {
+        evolving = false;
         scheduleAmbientLife();
       }
+    } else {
+      evolving = false;
+      void dinoIdleByMood(lastMood);
+      hatchInProgress = false;
+      scheduleAmbientLife();
     }
+    if (!document.hidden) dinoRaf = requestAnimationFrame(dinoTick);
+    return;
   }
-  drawDinoFrame(img, dinoPlayer.frame);
+
+  const displayFrame = pingPong
+    ? pingPongIndex(dinoPlayer.frame, frames)
+    : dinoPlayer.loop
+      ? ((dinoPlayer.frame % frames) + frames) % frames
+      : Math.min(dinoPlayer.frame, frames - 1);
+
+  drawDinoFrame(img, displayFrame);
   if (!document.hidden) dinoRaf = requestAnimationFrame(dinoTick);
+}
+
+/** Play one-shot evolve, then idle at the new stage. */
+async function playEvolve(from: GrowthStage, to: GrowthStage) {
+  const clip = from === "baby" && to === "teen" ? "evolveBabyTeen" : from === "teen" && to === "adult" ? "evolveTeenAdult" : null;
+  if (!clip || evolving) return;
+  const img = await loadClipSheet(dinoPlayer.folder, clip);
+  if (!img) {
+    growthStage = to;
+    void dinoIdleByMood(lastMood);
+    return;
+  }
+  evolving = true;
+  growthStage = to; // scale jumps at start of morph; strip also shows growth
+  dinoPlayer.queue = [];
+  dinoPlayer.clip = clip;
+  dinoPlayer.loop = false;
+  dinoPlayer.frame = 0;
+  dinoPlayer.acc = 0;
+  dinoPlayer.queue.push("idle");
 }
 
 async function startDinoLife(skin: SkinView, hatch: boolean) {
@@ -820,8 +1006,15 @@ function applyState(state: CompanionState) {
   sprite.dataset.mood = state.mood;
   updateParticles(state.mood);
   applyLook(state);
-  const looping = dinoPlayer.loop && dinoPlayer.clip === "idle";
-  if (dinoPlayer.running && looping) void dinoIdleByMood(lastMood);
+
+  const nextStage = normalizeGrowthStage(state.growthStage);
+  // Forma base enquanto growth OFF
+  growthStage = growthVisualsEnabled ? nextStage : "baby";
+  const hatching = ["eggMove", "crack", "hatch"].includes(dinoPlayer.clip);
+
+  const looping =
+    dinoPlayer.loop && (dinoPlayer.clip === "idle" || dinoPlayer.clip === "sleep");
+  if (dinoPlayer.running && looping && !evolving) void dinoIdleByMood(lastMood);
   $<HTMLSpanElement>("moodBadge").textContent = state.moodText ?? state.mood;
   const affection = Math.round(state.affection);
   $<HTMLDivElement>("affectionBar").style.width = `${affection}%`;
@@ -858,7 +1051,15 @@ function playReact(type: string) {
       return;
     }
     if (type === "POKE") {
-      void dinoPlay("hurt", false);
+      void dinoPlay("avoid", false);
+      playClipSfx("avoid");
+      const lines = POKE_LINES[companionArchetype] ?? POKE_LINES.curioso;
+      showSpeech(lines[Math.floor(Math.random() * lines.length)], 2600);
+      scheduleAmbientLife();
+      return;
+    }
+    if (type === "FEED") {
+      void dinoPlay("bite", false);
       playActionSound(type);
       scheduleAmbientLife();
       return;
@@ -992,7 +1193,7 @@ function handlePresence(p: PresencePayload) {
   document.body.classList.toggle("theme-light", p.theme === "light");
   document.body.classList.toggle("battery-low", !!p.batteryLow);
   applySky(p.timeOfDay);
-  const listening = !!(p.listeningMusic || p.trackTitle || p.activity === "listening_music");
+  const listening = !!(p.listeningMusic || p.activity === "listening_music");
   document.body.classList.toggle("listening", listening);
   if (p.screenHint || p.frontApp) {
     const short =
@@ -1002,8 +1203,10 @@ function handlePresence(p: PresencePayload) {
   } else {
     setActivityUi(activityText(p));
   }
-  if (listening) {
-    setMediaTrack(p.trackTitle || "Ouvindo com você…");
+  if (listening && p.trackTitle) {
+    setMediaTrack(p.trackTitle);
+  } else if (listening) {
+    setMediaTrack("Ouvindo com você…");
   } else {
     setMediaTrack("Sem música");
   }
@@ -1036,6 +1239,14 @@ function applySettingsToForm(settings: CompanionSettings) {
   setCheck("cfgFocusMode", !!settings.focusMode);
   setSelect("cfgFocusHours", settings.focusHours ?? 1);
   setCheck("cfgPranks", !!settings.pranksEnabled);
+  setCheck("cfgGrowthEnabled", !!settings.growthEnabled);
+  growthVisualsEnabled = !!settings.growthEnabled;
+  const growthHint = document.getElementById("cfgGrowthHint");
+  if (growthHint) {
+    growthHint.textContent = settings.growthEnabled
+      ? "Ligado: stages baby→teen→adult (arte ainda em teste)."
+      : "Desligado: só a forma base. Recomendado por enquanto.";
+  }
   setCheck("cfgCompact", !!settings.compact);
   setCheck("cfgListeningMusic", !!settings.listeningMusic);
   setCheck("cfgRememberChats", settings.rememberChats !== false);
@@ -1046,11 +1257,15 @@ function applySettingsToForm(settings: CompanionSettings) {
 
   const authStatus = document.getElementById("cfgAuthStatus");
   if (authStatus) {
-    authStatus.textContent = settings.loggedIn
-      ? `Supabase: ${settings.authEmail || "ok"}`
-        : settings.supabaseConfigured
-          ? "Desconectado — entre com email/senha"
-          : "Falta SUPABASE_* no .env (rode sync-supabase-config)";
+    if (settings.loggedIn && (settings.isAnonymous || settings.authEmail === "convidado")) {
+      authStatus.textContent = "Supabase: convidado (sessão anônima)";
+    } else if (settings.loggedIn) {
+      authStatus.textContent = `Supabase: ${settings.authEmail || "ok"}`;
+    } else if (settings.supabaseConfigured) {
+      authStatus.textContent = "Desconectado — convidado automático ou email/senha";
+    } else {
+      authStatus.textContent = "Falta SUPABASE_* no .env (rode sync-supabase-config)";
+    }
   }
   const authEmailInput = document.getElementById("cfgAuthEmail") as HTMLInputElement | null;
   if (authEmailInput && settings.authEmail) authEmailInput.value = settings.authEmail;
@@ -1069,14 +1284,39 @@ function applySettingsToForm(settings: CompanionSettings) {
   const streakEl = document.getElementById("missionsStreak");
   if (streakEl) streakEl.textContent = streak > 0 ? `${streak} dias` : "";
 
+  const dayTitle = document.getElementById("missionsDayTitle");
+  if (dayTitle) dayTitle.textContent = settings.missions?.dayLabel || "Hoje";
+
   const list = document.getElementById("missionsList");
   if (list) {
     list.innerHTML = "";
     for (const m of items) {
       const li = document.createElement("li");
       const prog = `${m.progress}/${m.target}`;
-      li.textContent = `${m.title} (${prog})`;
-      if (m.claimed || m.progress >= m.target) li.classList.add("done");
+      const label = document.createElement("span");
+      label.textContent = `${m.title} (${prog})`;
+      li.appendChild(label);
+      if (m.claimed) {
+        li.classList.add("done");
+        const done = document.createElement("span");
+        done.textContent = " Feito";
+        done.className = "mission-done";
+        li.appendChild(done);
+      } else if (m.progress >= m.target) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "settings-btn mission-claim";
+        btn.textContent = "Resgatar";
+        btn.addEventListener("click", async () => {
+          const res = await cw.companion.claimMission(m.id || m.kind);
+          if (res) {
+            const s = await cw.companion.getSettings();
+            applySettingsToForm(s);
+            showSpeech(`Missão concluída! +${res.rewardEnergy ?? 0} energia`, 3200);
+          }
+        });
+        li.appendChild(btn);
+      }
       list.appendChild(li);
     }
     if (items.length === 0) {
@@ -1149,6 +1389,7 @@ function bindSettingsPanel() {
   bindCheck("cfgFocusMode", "focusMode");
   bindSelect("cfgFocusHours", "focusHours");
   bindCheck("cfgPranks", "pranksEnabled");
+  bindCheck("cfgGrowthEnabled", "growthEnabled");
   bindCheck("cfgCompact", "compact");
   bindCheck("cfgListeningMusic", "listeningMusic");
   bindCheck("cfgRememberChats", "rememberChats");
@@ -1189,6 +1430,19 @@ function bindSettingsPanel() {
       return;
     }
     showSpeech("Conta criada ✓ — faça o quiz se ainda não tiver pet", 4000);
+  });
+  document.getElementById("cfgAuthForgot")?.addEventListener("click", async () => {
+    const email = authEmailEl?.value.trim() || "";
+    if (!email.includes("@")) {
+      showError("Digite o email da conta e toque em Esqueci a senha");
+      return;
+    }
+    const result = await cw.companion.resetPassword(email);
+    if (!result.ok) {
+      showError(result.error ?? "Não deu para enviar o email");
+      return;
+    }
+    showSpeech("Se a conta existir, enviamos o link de nova senha. Confira a caixa de entrada e o spam.", 5500);
   });
   document.getElementById("cfgAuthLogout")?.addEventListener("click", async () => {
     await cw.companion.logout();
@@ -1265,7 +1519,7 @@ function startPoll() {
   }, 60_000);
 }
 
-const QUIZ_REV = "personality-v2";
+const QUIZ_REV = "personality-v3";
 
 function quizCompleted(): boolean {
   try {

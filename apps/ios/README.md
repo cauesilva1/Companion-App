@@ -6,11 +6,11 @@ App SwiftUI + WidgetKit + Live Activity. Sync **direto com Supabase** (sem Expre
 
 1. No Mac (uma vez): coloque `SUPABASE_URL` + `SUPABASE_ANON_KEY` no `.env` da raiz e rode `node scripts/sync-supabase-config.mjs` (embute no Info.plist).
 2. Compile no Xcode (scheme **Companion**).
-3. **Config → Conta**: só email + senha (criar / entrar). Sem colar URL/key.
+3. App sobe sozinho na nuvem (sessão anônima + refresh no Keychain). Email/senha é opcional (Config → Conta) para o mesmo pet no Mac.
 4. Quiz → pet nasce e sobe no Postgres.
 5. Mesmo email no desktop → mesmo pet.
 
-Standalone (sem login) continua funcionando no aparelho.
+Standalone só se o Supabase não estiver embutido no build.
 
 ### Música (Spotify)
 
@@ -35,7 +35,7 @@ O iPhone **não** embute a API Node (diferente do DMG do Mac). Cloud = projeto S
 
 - macOS Sequoia 15+, Xcode 26.3 Universal, iOS 16.2+
 - Projeto Supabase com migration `supabase_auth_rls` aplicada (`npx prisma migrate deploy`)
-- Em Auth → Providers: Email ligado; para testes, desative “Confirm email”
+- Em Auth → Providers: **Anonymous** ligado; Email ligado; para testes, desative “Confirm email”
 
 ## Gerar / abrir
 

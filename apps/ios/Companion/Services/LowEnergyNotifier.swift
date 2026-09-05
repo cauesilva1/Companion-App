@@ -3,7 +3,7 @@ import UserNotifications
 
 /// Avisa quando a energia cai abaixo do limiar (anti-spam 12h).
 enum LowEnergyNotifier {
-  static let thresholdPercent = 25
+  static let thresholdPercent = 40
   private static let enabledKey = "companion.lowEnergyNotifEnabled"
   private static let lastSentKey = "companion.lowEnergyNotifLastSent"
   private static let cooldown: TimeInterval = 12 * 60 * 60

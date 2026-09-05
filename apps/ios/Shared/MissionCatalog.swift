@@ -37,9 +37,12 @@ enum MissionCatalog {
   ]
 
   static func dayKey(_ date: Date = Date()) -> String {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withFullDate]
-    return f.string(from: date)
+    var cal = Calendar.current
+    cal.timeZone = .current
+    let y = cal.component(.year, from: date)
+    let m = cal.component(.month, from: date)
+    let d = cal.component(.day, from: date)
+    return String(format: "%04d-%02d-%02d", y, m, d)
   }
 
   static func ensureToday() -> [LocalMission] {
@@ -87,14 +90,30 @@ enum MissionCatalog {
   }
 
   @discardableResult
-  static func claim(_ id: String) -> (missions: [LocalMission], rewardEnergy: Int, rewardAffection: Int)? {
+  static func claim(_ idOrKind: String) -> (missions: [LocalMission], rewardEnergy: Int, rewardAffection: Int)? {
     var missions = ensureToday()
-    guard let idx = missions.firstIndex(where: { $0.id == id }) else { return nil }
+    let idx = missions.firstIndex(where: { $0.id == idOrKind })
+      ?? missions.firstIndex(where: { $0.kind == idOrKind })
+      ?? missions.firstIndex(where: { idOrKind.contains($0.kind) })
+    guard let idx else { return nil }
     let m = missions[idx]
     guard !m.claimed, m.complete else { return nil }
     missions[idx].claimed = true
     save(dayKey: dayKey(), missions: missions)
     return (missions, m.rewardEnergy, m.rewardAffection)
+  }
+
+  /// Persiste o set do dia (após sync cloud).
+  static func replaceToday(_ missions: [LocalMission]) {
+    save(dayKey: dayKey(), missions: missions)
+  }
+
+  /// Rótulo curto pra UI (ex. "Hoje · 05/09").
+  static func displayDayLabel(_ date: Date = Date()) -> String {
+    let key = dayKey(date)
+    let parts = key.split(separator: "-")
+    guard parts.count == 3 else { return "Hoje" }
+    return "Hoje · \(parts[2])/\(parts[1])"
   }
 
   private struct Box: Codable {

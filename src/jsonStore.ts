@@ -7,6 +7,10 @@ export interface StoredCompanion {
   name: string;
   personality: string;
   skin: string;
+  /** baby | teen | adult */
+  growthStage?: string;
+  /** ISO — when current growthStage started */
+  growthStageAt?: string;
   artStyle: string;
   backdrop: string;
   archetype: string;
@@ -19,6 +23,7 @@ export interface StoredCompanion {
   /** Memória curta: fatos lembrados (máx ~8). */
   memoryNotes?: string[];
   userDisplayName?: string;
+  createdAt?: string;
 }
 
 export interface StoredInteraction {
@@ -70,9 +75,16 @@ export function saveStore(store: StoreFile): void {
 }
 
 export function toCompanion(row: StoredCompanion) {
+  const createdAt = row.createdAt ? new Date(row.createdAt) : new Date(row.lastInteractionAt);
+  const growthStageAt = row.growthStageAt
+    ? new Date(row.growthStageAt)
+    : createdAt;
   return {
     ...row,
+    growthStage: row.growthStage ?? "baby",
+    growthStageAt,
     lastDecayAt: new Date(row.lastDecayAt),
     lastInteractionAt: new Date(row.lastInteractionAt),
+    createdAt,
   };
 }

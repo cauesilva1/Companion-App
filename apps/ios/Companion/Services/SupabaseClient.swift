@@ -29,6 +29,45 @@ struct SupabaseSession: Codable, Equatable {
   var refreshToken: String
   var userId: String
   var email: String
+  /// Unix seconds; nil = legado (tentar refresh ao usar).
+  var expiresAt: TimeInterval?
+  var isAnonymous: Bool
+
+  var isExpiredOrNear: Bool {
+    guard let exp = expiresAt else { return true }
+    return Date().timeIntervalSince1970 >= exp - 60
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case accessToken, refreshToken, userId, email, expiresAt, isAnonymous
+  }
+
+  init(
+    accessToken: String,
+    refreshToken: String,
+    userId: String,
+    email: String,
+    expiresAt: TimeInterval?,
+    isAnonymous: Bool = false
+  ) {
+    self.accessToken = accessToken
+    self.refreshToken = refreshToken
+    self.userId = userId
+    self.email = email
+    self.expiresAt = expiresAt
+    self.isAnonymous = isAnonymous
+  }
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    accessToken = try c.decode(String.self, forKey: .accessToken)
+    refreshToken = try c.decode(String.self, forKey: .refreshToken)
+    userId = try c.decode(String.self, forKey: .userId)
+    email = try c.decode(String.self, forKey: .email)
+    expiresAt = try c.decodeIfPresent(TimeInterval.self, forKey: .expiresAt)
+    isAnonymous = try c.decodeIfPresent(Bool.self, forKey: .isAnonymous)
+      ?? email.isEmpty
+  }
 }
 
 enum SupabaseError: LocalizedError {
@@ -37,6 +76,7 @@ enum SupabaseError: LocalizedError {
   case decoding
   case noSession
   case needsEmailConfirm
+  case sessionExpired
 
   var errorDescription: String? {
     switch self {
@@ -45,6 +85,7 @@ enum SupabaseError: LocalizedError {
     case .decoding: return "Resposta inválida do Supabase"
     case .noSession: return "Faça login"
     case .needsEmailConfirm: return "Confirme o email no Supabase (ou desative confirm email no dashboard)"
+    case .sessionExpired: return "Sessão expirada — entre de novo"
     }
   }
 }
@@ -54,19 +95,118 @@ actor SupabaseClient {
   private let sessionKey = "companion.supabase.session.v1"
 
   func loadSession() -> SupabaseSession? {
-    guard let data = UserDefaults.standard.data(forKey: sessionKey) else { return nil }
-    return try? JSONDecoder().decode(SupabaseSession.self, from: data)
+    if let access = KeychainStore.get(.supabaseAccess),
+       let refresh = KeychainStore.get(.supabaseRefresh),
+       let userId = KeychainStore.get(.supabaseUserId),
+       !access.isEmpty, !refresh.isEmpty {
+      let email = KeychainStore.get(.supabaseEmail) ?? ""
+      let exp = KeychainStore.get(.supabaseExpires).flatMap(Double.init)
+      let anon = KeychainStore.get(.supabaseAnonymous) == "1"
+        || email.isEmpty
+        || email.lowercased().contains("anonymous")
+      return SupabaseSession(
+        accessToken: access,
+        refreshToken: refresh,
+        userId: userId,
+        email: email,
+        expiresAt: exp,
+        isAnonymous: anon
+      )
+    }
+    guard let data = UserDefaults.standard.data(forKey: sessionKey),
+          let s = try? JSONDecoder().decode(SupabaseSession.self, from: data) else { return nil }
+    // Migra para Keychain
+    saveSession(s)
+    return s
   }
 
   func saveSession(_ session: SupabaseSession?) {
-    if let session, let data = try? JSONEncoder().encode(session) {
-      UserDefaults.standard.set(data, forKey: sessionKey)
+    if let session {
+      KeychainStore.set(.supabaseAccess, value: session.accessToken)
+      KeychainStore.set(.supabaseRefresh, value: session.refreshToken)
+      KeychainStore.set(.supabaseUserId, value: session.userId)
+      KeychainStore.set(.supabaseEmail, value: session.email)
+      KeychainStore.set(.supabaseAnonymous, value: session.isAnonymous ? "1" : "0")
+      if let exp = session.expiresAt {
+        KeychainStore.set(.supabaseExpires, value: String(exp))
+      } else {
+        KeychainStore.delete(.supabaseExpires)
+      }
+      if let data = try? JSONEncoder().encode(session) {
+        UserDefaults.standard.set(data, forKey: sessionKey)
+      }
     } else {
+      KeychainStore.delete(.supabaseAccess)
+      KeychainStore.delete(.supabaseRefresh)
+      KeychainStore.delete(.supabaseUserId)
+      KeychainStore.delete(.supabaseEmail)
+      KeychainStore.delete(.supabaseExpires)
+      KeychainStore.delete(.supabaseAnonymous)
       UserDefaults.standard.removeObject(forKey: sessionKey)
     }
   }
 
   var isLoggedIn: Bool { loadSession() != nil }
+
+  /// Sessão utilizável (refresh se preciso). nil se precisa login de novo.
+  func validSession() async -> SupabaseSession? {
+    guard var session = loadSession() else { return nil }
+    if !session.isExpiredOrNear { return session }
+    do {
+      session = try await refreshSession(session)
+      return session
+    } catch {
+      saveSession(nil)
+      return nil
+    }
+  }
+
+  /// Mantém o usuário na nuvem sem pedir email: refresh ou login anônimo.
+  @discardableResult
+  func ensurePersistentSession() async -> SupabaseSession? {
+    guard SupabaseConfig.isConfigured else { return nil }
+    if let s = await validSession() { return s }
+    do {
+      return try await signInAnonymously()
+    } catch {
+      print("[supabase] anonymous failed: \(error.localizedDescription)")
+      return nil
+    }
+  }
+
+  /// Cria usuário anônimo (Auth → Providers → Anonymous no dashboard).
+  func signInAnonymously() async throws -> SupabaseSession {
+    let data = try await request(
+      path: "/auth/v1/signup",
+      method: "POST",
+      body: ["data": [:] as [String: String]],
+      token: nil,
+      allowRetry: false
+    )
+    let session = try parseSession(data, fallbackEmail: "", forceAnonymous: true)
+    saveSession(session)
+    try? await upsertProfile(session)
+    return session
+  }
+
+  private func refreshSession(_ session: SupabaseSession) async throws -> SupabaseSession {
+    let data = try await request(
+      path: "/auth/v1/token",
+      method: "POST",
+      body: ["refresh_token": session.refreshToken],
+      query: "grant_type=refresh_token",
+      token: nil,
+      allowRetry: false
+    )
+    var next = try parseSession(
+      data,
+      fallbackEmail: session.email,
+      forceAnonymous: session.isAnonymous
+    )
+    if session.isAnonymous { next.isAnonymous = true }
+    saveSession(next)
+    return next
+  }
 
   private func baseURL() throws -> URL {
     guard SupabaseConfig.isConfigured, let url = URL(string: SupabaseConfig.url) else {
@@ -90,7 +230,8 @@ actor SupabaseClient {
     body: [String: Any]? = nil,
     query: String = "",
     token: String? = nil,
-    prefer: String? = nil
+    prefer: String? = nil,
+    allowRetry: Bool = true
   ) async throws -> Data {
     let root = try baseURL()
     var urlString = root.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -108,7 +249,23 @@ actor SupabaseClient {
     }
     let (data, response) = try await URLSession.shared.data(for: req)
     guard let http = response as? HTTPURLResponse else { throw SupabaseError.decoding }
+    if http.statusCode == 401, allowRetry, let current = loadSession() {
+      let refreshed = try await refreshSession(current)
+      return try await request(
+        path: path,
+        method: method,
+        body: body,
+        query: query,
+        token: refreshed.accessToken,
+        prefer: prefer,
+        allowRetry: false
+      )
+    }
     guard (200..<300).contains(http.statusCode) else {
+      if http.statusCode == 401 {
+        saveSession(nil)
+        throw SupabaseError.sessionExpired
+      }
       throw SupabaseError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
     }
     return data
@@ -150,7 +307,11 @@ actor SupabaseClient {
     saveSession(nil)
   }
 
-  private func parseSession(_ data: Data, fallbackEmail: String) throws -> SupabaseSession {
+  private func parseSession(
+    _ data: Data,
+    fallbackEmail: String,
+    forceAnonymous: Bool = false
+  ) throws -> SupabaseSession {
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
           let access = json["access_token"] as? String,
           let refresh = json["refresh_token"] as? String
@@ -160,27 +321,38 @@ actor SupabaseClient {
       throw SupabaseError.decoding
     }
     let email = (user?["email"] as? String) ?? fallbackEmail
+    let expiresIn = (json["expires_in"] as? Double)
+      ?? (json["expires_in"] as? Int).map(Double.init)
+      ?? 3600
+    let isAnonymous = forceAnonymous
+      || (user?["is_anonymous"] as? Bool == true)
+      || email.isEmpty
     return SupabaseSession(
       accessToken: access,
       refreshToken: refresh,
       userId: userId,
-      email: email
+      email: email,
+      expiresAt: Date().timeIntervalSince1970 + expiresIn,
+      isAnonymous: isAnonymous
     )
+  }
+
+  private func requireSession() async throws -> SupabaseSession {
+    if let s = await validSession() { return s }
+    throw SupabaseError.noSession
   }
 
   private func upsertProfile(_ session: SupabaseSession) async throws {
+    let email = session.email.isEmpty
+      ? "anon-\(session.userId)@anonymous.local"
+      : session.email
     _ = try await request(
       path: "/rest/v1/Profile",
       method: "POST",
-      body: ["id": session.userId, "email": session.email],
+      body: ["id": session.userId, "email": email],
       token: session.accessToken,
       prefer: "resolution=merge-duplicates,return=minimal"
     )
-  }
-
-  private func requireSession() throws -> SupabaseSession {
-    guard let s = loadSession() else { throw SupabaseError.noSession }
-    return s
   }
 
   struct RemoteCompanion: Codable {
@@ -198,7 +370,7 @@ actor SupabaseClient {
   }
 
   func fetchMyCompanion() async throws -> CompanionSnapshot? {
-    let session = try requireSession()
+    let session = try await requireSession()
     let data = try await request(
       path: "/rest/v1/Companion",
       method: "GET",
@@ -211,7 +383,7 @@ actor SupabaseClient {
   }
 
   func upsertCompanion(_ snap: CompanionSnapshot, personality: String? = nil) async throws -> CompanionSnapshot {
-    let session = try requireSession()
+    let session = try await requireSession()
     let iso = ISO8601DateFormatter()
     iso.formatOptions = [.withInternetDateTime]
     let now = iso.string(from: Date())
@@ -274,7 +446,7 @@ actor SupabaseClient {
   }
 
   func pushCompanionState(_ snap: CompanionSnapshot) async throws {
-    let session = try requireSession()
+    let session = try await requireSession()
     let iso = ISO8601DateFormatter()
     iso.formatOptions = [.withInternetDateTime]
     let body: [String: Any] = [
@@ -312,7 +484,7 @@ actor SupabaseClient {
   }
 
   func fetchMissions(dayKey: String) async throws -> [LocalMission] {
-    let session = try requireSession()
+    let session = try await requireSession()
     let data = try await request(
       path: "/rest/v1/UserMissionProgress",
       method: "GET",
@@ -336,9 +508,22 @@ actor SupabaseClient {
   }
 
   func syncMissions(_ missions: [LocalMission], dayKey: String) async throws -> [LocalMission] {
-    let session = try requireSession()
+    let session = try await requireSession()
     var remote = try await fetchMissions(dayKey: dayKey)
-    if remote.isEmpty {
+    let localKinds = Set(missions.map(\.kind))
+    let remoteKinds = Set(remote.map(\.kind))
+
+    // Set do dia diferente (ou vazio): substitui remoto pelo catálogo local.
+    if remote.isEmpty || localKinds != remoteKinds {
+      for r in remote {
+        _ = try await request(
+          path: "/rest/v1/UserMissionProgress",
+          method: "DELETE",
+          query: "id=eq.\(r.id)",
+          token: session.accessToken,
+          prefer: "return=minimal"
+        )
+      }
       for m in missions {
         let id = "msn_\(dayKey)_\(m.kind)_\(String(session.userId.prefix(8)))"
         let body: [String: Any] = [
@@ -363,25 +548,43 @@ actor SupabaseClient {
         )
       }
       remote = try await fetchMissions(dayKey: dayKey)
-      return remote.isEmpty ? missions : remote
-    }
-    // Merge: take max progress / claimed from local
-    for m in missions {
-      guard let hit = remote.first(where: { $0.kind == m.kind }) else { continue }
-      let progress = max(hit.progress, m.progress)
-      let claimed = hit.claimed || m.claimed
-      if progress != hit.progress || claimed != hit.claimed {
-        _ = try await request(
-          path: "/rest/v1/UserMissionProgress",
-          method: "PATCH",
-          body: ["progress": progress, "claimed": claimed],
-          query: "id=eq.\(hit.id)",
-          token: session.accessToken,
-          prefer: "return=minimal"
-        )
+    } else {
+      for m in missions {
+        guard let hit = remote.first(where: { $0.kind == m.kind }) else { continue }
+        let progress = max(hit.progress, m.progress)
+        let claimed = hit.claimed || m.claimed
+        if progress != hit.progress || claimed != hit.claimed {
+          _ = try await request(
+            path: "/rest/v1/UserMissionProgress",
+            method: "PATCH",
+            body: ["progress": progress, "claimed": claimed],
+            query: "id=eq.\(hit.id)",
+            token: session.accessToken,
+            prefer: "return=minimal"
+          )
+        }
       }
+      remote = try await fetchMissions(dayKey: dayKey)
     }
-    return try await fetchMissions(dayKey: dayKey)
+
+    // Devolve set local (títulos/targets do dia) + ids/progress do remoto.
+    // Nunca zera progress local se o remoto vier atrasado.
+    let merged = missions.map { m -> LocalMission in
+      let hit = remote.first(where: { $0.kind == m.kind })
+      let progress = max(m.progress, hit?.progress ?? 0)
+      return LocalMission(
+        id: hit?.id ?? m.id,
+        kind: m.kind,
+        title: m.title,
+        description: m.description,
+        target: m.target,
+        progress: progress,
+        rewardEnergy: m.rewardEnergy,
+        rewardAffection: m.rewardAffection,
+        claimed: m.claimed || (hit?.claimed ?? false)
+      )
+    }
+    return merged
   }
 
   private func snapshot(from row: RemoteCompanion) -> CompanionSnapshot {
@@ -394,7 +597,9 @@ actor SupabaseClient {
       affection: Double(row.affection),
       skin: row.skin,
       archetype: row.archetype,
-      updatedAt: Date()
+      updatedAt: Date(),
+      growthStage: "baby",
+      createdAt: nil
     )
   }
 }

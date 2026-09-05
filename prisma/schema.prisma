@@ -36,6 +36,14 @@ enum MissionKind {
   OPEN_APP
 }
 
+/// Auth local (Express) — desktop fallback quando não usa só Supabase.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
 /// Mirror of auth.users for display (optional).
 model Profile {
   id        String   @id
@@ -50,6 +58,10 @@ model Companion {
   name              String
   personality       String
   skin              String        @default("dino-mort")
+  /// baby | teen | adult — visual growth; missing stage art falls back to base/
+  growthStage       String        @default("baby")
+  /// When the companion entered the current growthStage (dwell clock).
+  growthStageAt     DateTime      @default(now())
   artStyle          String        @default("pixel")
   backdrop          String        @default("sky")
   archetype         String        @default("curioso")

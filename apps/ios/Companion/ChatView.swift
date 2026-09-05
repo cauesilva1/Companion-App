@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Chat dedicado — campo + Enviar + teclado fecha após send.
+/// Chat dedicado — estilo conversa (avatar + balão), campo + Enviar.
 struct ChatView: View {
   @ObservedObject var model: CompanionViewModel
   @FocusState private var focused: Bool
@@ -12,41 +12,47 @@ struct ChatView: View {
 
   var body: some View {
     ZStack {
-      SkyBackground(artOpacity: 0.2)
+      CompanionTheme.screenBackground
       VStack(spacing: 0) {
         ScrollViewReader { proxy in
           ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
+            LazyVStack(alignment: .leading, spacing: 14) {
               ForEach(turns) { turn in
                 bubble(turn)
                   .id(turn.id)
               }
+              if model.isBusy {
+                typingRow
+                  .id("typing")
+              }
             }
-            .padding(16)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 16)
           }
           .onChange(of: turns.count) { _ in
-            if let last = turns.last {
-              withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-            }
+            scrollToBottom(proxy)
+          }
+          .onChange(of: model.isBusy) { _ in
+            scrollToBottom(proxy)
           }
           .onAppear {
-            if let last = turns.last {
-              proxy.scrollTo(last.id, anchor: .bottom)
-            }
+            scrollToBottom(proxy)
           }
         }
 
-        Divider()
+        Divider().overlay(Color.black.opacity(0.08))
         HStack(alignment: .bottom, spacing: 10) {
           TextField("Mensagem…", text: $model.chatText, axis: .vertical)
             .lineLimit(1...4)
             .focused($focused)
+            .foregroundStyle(CompanionTheme.title)
             .submitLabel(.send)
             .onSubmit { Task { await send() } }
             .padding(12)
             .background(
               RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(red: 0.94, green: 0.96, blue: 1.0))
+                .fill(Color.white)
+                .shadow(color: Color.black.opacity(0.06), radius: 4, y: 2)
             )
 
           Button {
@@ -55,7 +61,7 @@ struct ChatView: View {
             Image(systemName: "arrow.up.circle.fill")
               .font(.system(size: 34))
               .foregroundStyle(
-                canSend ? CompanionTheme.play : Color.gray.opacity(0.4)
+                canSend ? CompanionTheme.play : Color.gray.opacity(0.35)
               )
           }
           .buttonStyle(.plain)
@@ -64,18 +70,22 @@ struct ChatView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
+        .background(Color.white.opacity(0.96))
       }
     }
     .preferredColorScheme(.light)
     .navigationTitle("Conversar")
     .navigationBarTitleDisplayMode(.inline)
+    .toolbarBackground(Color.white.opacity(0.95), for: .navigationBar)
+    .toolbarBackground(.visible, for: .navigationBar)
+    .toolbarColorScheme(.light, for: .navigationBar)
     .toolbar {
       ToolbarItem(placement: .cancellationAction) {
         Button("Fechar") {
           focused = false
           dismiss()
         }
+        .foregroundStyle(CompanionTheme.play)
       }
     }
     .onAppear { focused = true }
@@ -91,24 +101,74 @@ struct ChatView: View {
     await model.interact("CHAT")
   }
 
+  private func scrollToBottom(_ proxy: ScrollViewProxy) {
+    if model.isBusy {
+      withAnimation { proxy.scrollTo("typing", anchor: .bottom) }
+    } else if let last = turns.last {
+      withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+    }
+  }
+
+  private var typingRow: some View {
+    HStack(alignment: .top, spacing: 10) {
+      DinoStaticFrame(skin: model.snapshot.skin, size: 34)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      Text("\(model.snapshot.name) está digitando…")
+        .font(.caption)
+        .foregroundStyle(CompanionTheme.subtitle)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+          RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(Color.white)
+            .shadow(color: Color.black.opacity(0.06), radius: 4, y: 2)
+        )
+      Spacer(minLength: 36)
+    }
+  }
+
   @ViewBuilder
   private func bubble(_ turn: ChatTurn) -> some View {
-    HStack {
-      if turn.isUser { Spacer(minLength: 40) }
-      VStack(alignment: turn.isUser ? .trailing : .leading, spacing: 4) {
-        Text(turn.isUser ? "Você" : model.snapshot.name)
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(CompanionTheme.subtitle)
+    if turn.isUser {
+      HStack(alignment: .top, spacing: 8) {
+        Spacer(minLength: 48)
         Text(turn.text)
           .font(.body)
-          .foregroundStyle(CompanionTheme.title)
-          .padding(12)
+          .foregroundStyle(Color.white)
+          .padding(.horizontal, 14)
+          .padding(.vertical, 10)
           .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-              .fill(turn.isUser ? CompanionTheme.play.opacity(0.18) : Color.white.opacity(0.92))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+              .fill(CompanionTheme.play)
           )
       }
-      if !turn.isUser { Spacer(minLength: 40) }
+    } else {
+      HStack(alignment: .top, spacing: 10) {
+        DinoStaticFrame(skin: model.snapshot.skin, size: 34)
+          .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+              .stroke(Color.black.opacity(0.06), lineWidth: 1)
+          )
+          .accessibilityLabel(model.snapshot.name)
+
+        VStack(alignment: .leading, spacing: 4) {
+          Text(model.snapshot.name)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(CompanionTheme.subtitle)
+          Text(turn.text)
+            .font(.body)
+            .foregroundStyle(CompanionTheme.title)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+              RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white)
+                .shadow(color: Color.black.opacity(0.07), radius: 5, y: 2)
+            )
+        }
+        Spacer(minLength: 36)
+      }
     }
   }
 }
@@ -126,9 +186,13 @@ struct MissionsSheet: View {
   var body: some View {
     NavigationStack {
       ZStack {
-        SkyBackground(artOpacity: 0.18)
+        CompanionTheme.screenBackground
         ScrollView {
           VStack(alignment: .leading, spacing: 12) {
+            Text(MissionCatalog.displayDayLabel())
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(CompanionTheme.subtitle)
+              .padding(.horizontal, 4)
             ForEach(model.missions) { mission in
               CompanionCard {
                 VStack(alignment: .leading, spacing: 8) {
@@ -170,9 +234,13 @@ struct MissionsSheet: View {
       .preferredColorScheme(.light)
       .navigationTitle("Missões")
       .navigationBarTitleDisplayMode(.inline)
+      .toolbarBackground(Color.white.opacity(0.95), for: .navigationBar)
+      .toolbarBackground(.visible, for: .navigationBar)
+      .toolbarColorScheme(.light, for: .navigationBar)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Fechar") { dismiss() }
+            .foregroundStyle(CompanionTheme.play)
         }
       }
     }

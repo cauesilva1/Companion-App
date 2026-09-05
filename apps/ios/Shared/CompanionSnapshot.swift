@@ -34,6 +34,9 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
   var skin: String
   var archetype: String
   var updatedAt: Date
+  /// baby | teen | adult — opcional para snapshots antigos
+  var growthStage: String?
+  var createdAt: Date?
 
   static let demo = CompanionSnapshot(
     id: "demo",
@@ -44,11 +47,17 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
     affection: 80,
     skin: "dino-mort",
     archetype: "zoeiro",
-    updatedAt: Date()
+    updatedAt: Date(),
+    growthStage: "baby",
+    createdAt: Date()
   )
 
   var energyPercent: Int { Int(energy.rounded()) }
   var affectionPercent: Int { Int(affection.rounded()) }
+
+  var normalizedGrowthStage: GrowthStage {
+    Growth.effective(growthStage)
+  }
 
   var moodEmoji: String {
     switch mood.uppercased() {
@@ -69,12 +78,20 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
   }
 
   static func imageName(forSkin skin: String) -> String {
-    switch skin.lowercased() {
-    case "dino-doux", "doux": return "DinoDoux"
-    case "dino-vita", "vita": return "DinoVita"
-    case "dino-olaf", "olaf": return "DinoOlaf"
-    case "dino-kuro", "kuro": return "DinoKuro"
-    case "dino-mort", "mort": return "DinoMort"
+    let key = skin.lowercased().replacingOccurrences(of: "dino-", with: "")
+    switch key {
+    case "doux": return "DinoDoux"
+    case "vita": return "DinoVita"
+    case "olaf": return "DinoOlaf"
+    case "kuro": return "DinoKuro"
+    case "mort": return "DinoMort"
+    case "cole": return "DinoCole"
+    case "kira": return "DinoKira"
+    case "loki": return "DinoLoki"
+    case "mono": return "DinoMono"
+    case "nico": return "DinoNico"
+    case "sena": return "DinoSena"
+    case "tard": return "DinoTard"
     default: return "DinoMort"
     }
   }

@@ -7,6 +7,7 @@ struct CompanionEntry: TimelineEntry {
   let frameIndex: Int
   /// Texto estável por ciclo (não sorteia a cada frame).
   let statusLine: String
+  let needLine: String
 }
 
 enum CompanionWidgetTimeline {
@@ -21,16 +22,35 @@ enum CompanionWidgetTimeline {
     #else
     let frameCount = 3
     #endif
-    let status = stableStatus(snapshot)
+    let (status, need) = lines(for: snapshot)
     let steps = Int(cycleSeconds / frameInterval)
     return (0..<steps).map { i in
       CompanionEntry(
         date: now.addingTimeInterval(Double(i) * frameInterval),
         snapshot: snapshot,
         frameIndex: i % frameCount,
-        statusLine: status
+        statusLine: status,
+        needLine: need
       )
     }
+  }
+
+  static func lines(for snapshot: CompanionSnapshot) -> (String, String) {
+    if let speech = WidgetSpeechStore.load(), speech.hasFreshMusic {
+      let status = speech.trackLine ?? stableStatus(snapshot)
+      let need = speech.comment?.trimmingCharacters(in: .whitespacesAndNewlines)
+      if let need, !need.isEmpty {
+        return (status, need)
+      }
+      return (status, needLine(snapshot))
+    }
+    if let speech = WidgetSpeechStore.load(),
+       let idle = speech.idleLine?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !idle.isEmpty,
+       Date().timeIntervalSince(speech.updatedAt) < 60 * 60 {
+      return (idle, needLine(snapshot))
+    }
+    return (stableStatus(snapshot), needLine(snapshot))
   }
 
   static func stableStatus(_ snapshot: CompanionSnapshot) -> String {
@@ -48,21 +68,31 @@ enum CompanionWidgetTimeline {
       return t.isEmpty ? "\(snapshot.name) por aqui" : t
     }
   }
+
+  static func needLine(_ snapshot: CompanionSnapshot) -> String {
+    LocalVoice.widgetNeedLine(
+      mood: snapshot.mood,
+      energy: snapshot.energyPercent,
+      affection: snapshot.affectionPercent
+    )
+  }
 }
 
 struct CompanionProvider: TimelineProvider {
   func placeholder(in context: Context) -> CompanionEntry {
-    CompanionEntry(date: Date(), snapshot: .demo, frameIndex: 0, statusLine: "Oi!")
+    CompanionEntry(date: Date(), snapshot: .demo, frameIndex: 0, statusLine: "Oi!", needLine: "de boa por aqui")
   }
 
   func getSnapshot(in context: Context, completion: @escaping (CompanionEntry) -> Void) {
     let snap = CompanionSnapshotStore.load() ?? .demo
+    let (status, need) = CompanionWidgetTimeline.lines(for: snap)
     completion(
       CompanionEntry(
         date: Date(),
         snapshot: snap,
         frameIndex: 0,
-        statusLine: CompanionWidgetTimeline.stableStatus(snap)
+        statusLine: status,
+        needLine: need
       )
     )
   }
@@ -85,7 +115,7 @@ struct CompanionHomeWidget: Widget {
         .companionMockupWidgetBackground()
     }
     .configurationDisplayName("Companion")
-    .description("Humor e energia do seu dino.")
+    .description("Humor do seu dino.")
     .supportedFamilies([.systemSmall, .systemMedium])
   }
 }
@@ -93,6 +123,13 @@ struct CompanionHomeWidget: Widget {
 struct CompanionHomeView: View {
   @Environment(\.widgetFamily) private var family
   let entry: CompanionEntry
+
+  private var lightChrome: Bool { SkyPeriod.current().prefersLightChrome }
+  private var titleColor: Color { lightChrome ? Color.white : Color(red: 0.12, green: 0.18, blue: 0.32) }
+  private var bodyColor: Color { lightChrome ? Color.white.opacity(0.9) : Color(red: 0.22, green: 0.28, blue: 0.42) }
+  private var panelFill: Color {
+    lightChrome ? Color.black.opacity(0.38) : Color.white.opacity(0.72)
+  }
 
   var body: some View {
     Group {
@@ -105,52 +142,60 @@ struct CompanionHomeView: View {
   }
 
   private var small: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(alignment: .top) {
-        WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 44)
-        Spacer(minLength: 0)
-        Text("⚡\(entry.snapshot.energyPercent)%")
-          .font(.caption.weight(.bold).monospacedDigit())
-          .foregroundStyle(Color.black.opacity(0.85))
-      }
-      Text(entry.snapshot.name)
-        .font(.subheadline.weight(.bold))
-        .foregroundStyle(Color.black.opacity(0.9))
-        .lineLimit(1)
-      Text(entry.statusLine)
-        .font(.caption.weight(.medium))
-        .foregroundStyle(Color.black.opacity(0.7))
-        .lineLimit(2)
-        .minimumScaleFactor(0.85)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    .padding(8)
-  }
-
-  private var medium: some View {
-    HStack(spacing: 14) {
-      WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 72)
-      VStack(alignment: .leading, spacing: 6) {
+    HStack(alignment: .center, spacing: 8) {
+      WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 44)
+      VStack(alignment: .leading, spacing: 2) {
         Text(entry.snapshot.name)
-          .font(.title3.bold())
-          .foregroundStyle(Color.black.opacity(0.92))
+          .font(.subheadline.weight(.bold))
+          .foregroundStyle(titleColor)
+          .lineLimit(1)
         Text(entry.statusLine)
-          .font(.subheadline.weight(.medium))
+          .font(.caption.weight(.medium))
+          .foregroundStyle(bodyColor)
           .lineLimit(2)
-          .foregroundStyle(Color.black.opacity(0.72))
-        ProgressView(value: Double(entry.snapshot.energyPercent), total: 100)
-          .tint(CompanionTheme.energy)
-        HStack(spacing: 12) {
-          Label("\(entry.snapshot.energyPercent)%", systemImage: "bolt.fill")
-          Label("\(entry.snapshot.affectionPercent)%", systemImage: "heart.fill")
-        }
-        .font(.caption.weight(.semibold).monospacedDigit())
-        .foregroundStyle(Color.black.opacity(0.65))
+          .minimumScaleFactor(0.8)
+        Text(entry.needLine)
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(lightChrome ? Color.white.opacity(0.78) : CompanionTheme.play)
+          .lineLimit(2)
+          .minimumScaleFactor(0.8)
       }
       Spacer(minLength: 0)
     }
+    .padding(8)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    .background(
+      RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .fill(panelFill)
+    )
+    .padding(4)
+  }
+
+  private var medium: some View {
+    HStack(spacing: 12) {
+      WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 72)
+      VStack(alignment: .leading, spacing: 5) {
+        Text(entry.snapshot.name)
+          .font(.title3.bold())
+          .foregroundStyle(titleColor)
+        Text(entry.statusLine)
+          .font(.subheadline.weight(.medium))
+          .lineLimit(2)
+          .foregroundStyle(bodyColor)
+        Text(entry.needLine)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(lightChrome ? Color.white.opacity(0.78) : CompanionTheme.play)
+          .lineLimit(1)
+      }
+      Spacer(minLength: 0)
+    }
     .padding(10)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    .background(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .fill(panelFill)
+    )
+    .padding(4)
   }
 }
 

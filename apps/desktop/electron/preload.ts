@@ -38,10 +38,12 @@ contextBridge.exposeInMainWorld("companion", {
     ipcRenderer.invoke("companion:login", email, password),
   register: (email: string, password: string) =>
     ipcRenderer.invoke("companion:register", email, password),
+  resetPassword: (email: string) => ipcRenderer.invoke("companion:resetPassword", email),
   logout: () => ipcRenderer.invoke("companion:logout"),
   getSession: () => ipcRenderer.invoke("companion:getSession"),
   getSettings: () => ipcRenderer.invoke("companion:getSettings"),
   setSettings: (patch: object) => ipcRenderer.invoke("companion:setSettings", patch),
+  claimMission: (idOrKind: string) => ipcRenderer.invoke("companion:claimMission", idOrKind),
   setQuizMode: (on: boolean) => ipcRenderer.invoke("companion:setQuizMode", on),
   setCompact: (on: boolean) => ipcRenderer.invoke("companion:setCompact", on),
   setHabitat: (on: boolean) => ipcRenderer.invoke("companion:setHabitat", on),
