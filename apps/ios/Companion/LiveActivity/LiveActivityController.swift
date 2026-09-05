@@ -2,6 +2,7 @@ import ActivityKit
 import Foundation
 import WidgetKit
 
+@MainActor
 enum LiveActivityController {
   @discardableResult
   static func start(snapshot: CompanionSnapshot, line: String? = nil) throws -> String {
@@ -41,7 +42,10 @@ enum LiveActivityController {
     let activityId = activity.id
     let alertTitle = snapshot.name
     let alertBody = line ?? track.nilIfEmpty ?? "Correndo na Island…"
-    Task {
+    let skin = snapshot.skin
+    let moodLine = line ?? snapshot.moodText
+    let energy = snapshot.energyPercent
+    Task { @MainActor in
       let alert = AlertConfiguration(
         title: LocalizedStringResource(stringLiteral: alertTitle),
         body: LocalizedStringResource(stringLiteral: alertBody),
@@ -53,9 +57,9 @@ enum LiveActivityController {
       )
       await animateIsland(
         activityId: activityId,
-        skin: snapshot.skin,
-        line: line ?? snapshot.moodText,
-        energy: snapshot.energyPercent,
+        skin: skin,
+        line: moodLine,
+        energy: energy,
         track: track
       )
     }
