@@ -1,0 +1,23 @@
+# Supabase local/CLI — remote project for IoT + survival tick.
+project_id = "zlsrurqfkhspwbzmqimp"
+
+[api]
+enabled = true
+
+[functions.iot-presence]
+verify_jwt = false
+
+[functions.iot-interact]
+verify_jwt = false
+
+[functions.iot-register]
+verify_jwt = true
+
+[functions.companion-state]
+verify_jwt = true
+
+[functions.steps-ingest]
+verify_jwt = true
+
+[functions.tick-decay]
+verify_jwt = false

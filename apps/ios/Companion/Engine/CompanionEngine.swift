@@ -4,6 +4,12 @@ actor CompanionEngine {
   static let shared = CompanionEngine()
 
   private var file = CompanionLocalStore.load()
+  /// Cloud-First: quando true, decay local não sobrescreve stats (só cache UI).
+  private(set) var cloudAuthoritative = false
+
+  func setCloudAuthoritative(_ on: Bool) {
+    cloudAuthoritative = on
+  }
 
   func ensureCompanion() -> StoredCompanion {
     if let existing = file.companions.first {
@@ -70,10 +76,19 @@ actor CompanionEngine {
 
   var hasCompanion: Bool { !file.companions.isEmpty }
 
+  /// Limpa pet local (ex.: conta cloud sem companion → forçar quiz).
+  func clearAllLocal() {
+    file = CompanionFileStore(companions: [], interactions: [])
+    CompanionLocalStore.clear()
+    CompanionSnapshotStore.clear()
+  }
+
   func currentSnapshot() -> CompanionSnapshot {
     var companion = ensureCompanion()
-    applyDecay(&companion)
-    persist(companion)
+    if !cloudAuthoritative {
+      applyDecay(&companion)
+      persist(companion)
+    }
     let greeting = LocalVoice.greeting(
       archetype: companion.archetype,
       hour: Calendar.current.component(.hour, from: Date())
@@ -86,10 +101,57 @@ actor CompanionEngine {
     return snap
   }
 
+  /// Aplica snapshot vindo da cloud sem recalcular decay local.
+  @discardableResult
+  func adoptCloudSnapshot(_ snap: CompanionSnapshot) -> CompanionSnapshot {
+    let now = Date()
+    if var existing = file.companions.first {
+      existing.id = snap.id
+      existing.name = snap.name
+      existing.skin = snap.skin
+      existing.archetype = snap.archetype
+      existing.personality = snap.archetype
+      existing.mood = CompanionMood(rawValue: snap.mood.uppercased()) ?? existing.mood
+      existing.energy = snap.energy
+      existing.affection = snap.affection
+      existing.growthStage = snap.growthStage
+      persist(existing)
+    } else {
+      let created = StoredCompanion(
+        id: snap.id,
+        name: snap.name,
+        personality: snap.archetype,
+        skin: snap.skin,
+        artStyle: "pixel",
+        backdrop: "sky",
+        archetype: snap.archetype,
+        mood: CompanionMood(rawValue: snap.mood.uppercased()) ?? .HAPPY,
+        energy: snap.energy,
+        affection: snap.affection,
+        lastDecayAt: now,
+        lastInteractionAt: now,
+        pendingAlert: nil,
+        memoryNotes: [],
+        userDisplayName: nil,
+        growthStage: snap.growthStage ?? "baby",
+        createdAt: snap.createdAt ?? now,
+        growthStageAt: now
+      )
+      file.companions = [created]
+      file.interactions = []
+      CompanionLocalStore.save(file)
+    }
+    CompanionSnapshotStore.saveCompanionId(snap.id)
+    CompanionSnapshotStore.save(snap)
+    return snap
+  }
+
   func interact(type: InteractionType, message: String? = nil) async -> (CompanionSnapshot, String) {
     var companion = ensureCompanion()
     let now = Date()
-    applyDecay(&companion)
+    if !cloudAuthoritative {
+      applyDecay(&companion)
+    }
 
     let result = MoodEngine.applyInteraction(
       energy: companion.energy,

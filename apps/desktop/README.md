@@ -1,6 +1,9 @@
-# Companion Electron — Popup Tamagotchi
+# Companion Electron — Popup Tamagotchi (LEGACY UI)
 
-Popup frameless no canto da tela. Cérebro local (API embutida / mock) + **sync direto com Supabase** (mesma conta do iPhone).
+> **Freeze:** não adicionar lógica nova de decay/missões/IoT aqui.
+> Fonte de verdade = Supabase — ver [`docs/CLOUD_FIRST.md`](../../docs/CLOUD_FIRST.md).
+
+Popup frameless no canto da tela. Sync fino com Supabase (mesma conta do iPhone). API Express embutida só para LLM/voz no pack.
 
 ## Pré-requisitos
 

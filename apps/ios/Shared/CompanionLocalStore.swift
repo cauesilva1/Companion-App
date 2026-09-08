@@ -33,7 +33,9 @@ struct StoredCompanion: Codable, Equatable, Sendable {
       archetype: archetype,
       updatedAt: Date(),
       growthStage: Growth.normalize(growthStage).rawValue,
-      createdAt: createdAt ?? lastInteractionAt
+      createdAt: createdAt ?? lastInteractionAt,
+      presenceStatus: nil,
+      decayFrozen: nil
     )
   }
 }
@@ -86,6 +88,11 @@ enum CompanionLocalStore {
     guard let data = try? encoder.encode(store) else { return }
     CompanionAppGroup.defaults.set(data, forKey: key)
     UserDefaults.standard.set(data, forKey: key)
+  }
+
+  static func clear() {
+    let empty = CompanionFileStore(companions: [], interactions: [])
+    save(empty)
   }
 
   static func nextId(prefix: String = "cmp") -> String {

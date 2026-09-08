@@ -36,6 +36,13 @@ enum MissionKind {
   OPEN_APP
 }
 
+/// Desk / physical presence for IoT + expedition freeze.
+enum PresenceStatus {
+  present
+  away
+  expedition
+}
+
 /// Auth local (Express) — desktop fallback quando não usa só Supabase.
 model User {
   id           String   @id @default(cuid())
@@ -53,29 +60,37 @@ model Profile {
 
 /// userId = auth.uid()::text (Supabase Auth). Sem FK Prisma → auth.users.
 model Companion {
-  id                String        @id @default(cuid())
+  id                String         @id @default(cuid())
   userId            String
   name              String
   personality       String
-  skin              String        @default("dino-mort")
+  skin              String         @default("dino-mort")
   /// baby | teen | adult — visual growth; missing stage art falls back to base/
-  growthStage       String        @default("baby")
+  growthStage       String         @default("baby")
   /// When the companion entered the current growthStage (dwell clock).
-  growthStageAt     DateTime      @default(now())
-  artStyle          String        @default("pixel")
-  backdrop          String        @default("sky")
-  archetype         String        @default("curioso")
-  mood              Mood          @default(CONTENT)
-  energy            Int           @default(80)
-  affection         Int           @default(55)
-  lastDecayAt       DateTime      @default(now())
-  lastInteractionAt DateTime      @default(now())
+  growthStageAt     DateTime       @default(now())
+  artStyle          String         @default("pixel")
+  backdrop          String         @default("sky")
+  archetype         String         @default("curioso")
+  mood              Mood           @default(CONTENT)
+  energy            Int            @default(80)
+  affection         Int            @default(55)
+  lastDecayAt       DateTime       @default(now())
+  lastInteractionAt DateTime       @default(now())
+  presenceStatus    PresenceStatus @default(present)
+  lastPresenceAt    DateTime       @default(now())
+  presenceRssi      Int?
+  /// true when away/expedition — survival tick skips this companion.
+  decayFrozen       Boolean        @default(false)
   pendingAlert      String?
-  memoryNotes       String[]      @default([])
-  createdAt         DateTime      @default(now())
+  memoryNotes       String[]       @default([])
+  /// Quiz preferences: vibe, archetype, focus, communicationStyle, …
+  traits            Json?
+  createdAt         DateTime       @default(now())
   interactions      Interaction[]
 
   @@index([userId])
+  @@index([decayFrozen])
 }
 
 model Interaction {
@@ -109,4 +124,52 @@ model UserMissionProgress {
 
   @@unique([userId, dayKey, kind])
   @@index([userId, dayKey])
+}
+
+model IotDevice {
+  id            String    @id @default(cuid())
+  userId        String
+  deviceKeyHash String
+  label         String    @default("mesa")
+  lastSeenAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  presenceEvents IotPresenceEvent[]
+  interactEvents IotInteractEvent[]
+
+  @@index([userId])
+  @@index([deviceKeyHash])
+}
+
+model IotPresenceEvent {
+  id        String    @id @default(cuid())
+  deviceId  String
+  device    IotDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  rssi      Int
+  createdAt DateTime  @default(now())
+
+  @@index([deviceId, createdAt])
+}
+
+model IotInteractEvent {
+  id        String    @id @default(cuid())
+  deviceId  String
+  device    IotDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  kind      String
+  createdAt DateTime  @default(now())
+
+  @@index([deviceId, createdAt])
+}
+
+/// Daily HealthKit step ledger (cloud-authoritative feed).
+model StepsLedger {
+  id           String   @id @default(cuid())
+  userId       String
+  dayKey       String
+  steps        Int      @default(0)
+  energyGranted Int     @default(0)
+  updatedAt    DateTime @default(now())
+
+  @@unique([userId, dayKey])
+  @@index([userId])
 }

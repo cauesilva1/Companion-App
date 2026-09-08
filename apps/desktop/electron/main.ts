@@ -1,3 +1,10 @@
+/**
+ * Companion Electron main process.
+ *
+ * @deprecated Cloud-First: NÃO adicionar survival/decay/missões novas aqui.
+ * Fonte de verdade = Supabase RPCs + Edge Functions (docs/CLOUD_FIRST.md).
+ * Este processo é UI legada + LLM/voz local + sync fino.
+ */
 import {
   app,
   BrowserWindow,

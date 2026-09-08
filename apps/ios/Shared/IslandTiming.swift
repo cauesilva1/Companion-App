@@ -2,6 +2,9 @@ import Foundation
 
 /// Tempos da cena na Dynamic Island (A corre → B dano → C some).
 enum IslandTiming {
+  /// `true` = congela corrida/hurt (animação travada). Reative depois de corrigir.
+  static let animationFrozen = true
+
   static let runDuration: TimeInterval = 1.4
   static let hurtDuration: TimeInterval = 0.45
   static let fadeDuration: TimeInterval = 0.28
@@ -14,6 +17,7 @@ enum IslandTiming {
   }
 
   static func phase(at progress: Double) -> Phase {
+    if animationFrozen { return .done }
     let t = max(0, min(1, progress)) * total
     if t < runDuration { return .run }
     if t < runDuration + hurtDuration { return .hurt }
@@ -23,6 +27,7 @@ enum IslandTiming {
 
   /// 0…1 só na fase de corrida (posição horizontal).
   static func runX(at progress: Double) -> Double {
+    if animationFrozen { return 0.5 }
     let t = max(0, min(1, progress)) * total
     if t >= runDuration { return 1 }
     let u = t / runDuration
@@ -31,6 +36,7 @@ enum IslandTiming {
 
   /// Progresso 0…1 a partir de `startedAt` (widget anima com o relógio).
   static func progress(since startedAt: Date, now: Date = Date()) -> Double {
+    if animationFrozen { return 1 }
     let elapsed = now.timeIntervalSince(startedAt)
     guard total > 0 else { return 1 }
     return max(0, min(1, elapsed / total))
@@ -41,6 +47,7 @@ enum IslandTiming {
   }
 
   static func isExpired(startedAt: Date, now: Date = Date(), grace: TimeInterval = 2) -> Bool {
-    now.timeIntervalSince(startedAt) >= total + grace
+    if animationFrozen { return true }
+    return now.timeIntervalSince(startedAt) >= total + grace
   }
 }

@@ -2,18 +2,19 @@ import Foundation
 
 /// Quiz de personalidade — “como você quer viver com o companion”.
 enum CompanionQuiz {
-  static let revision = "companion-life-v2"
-  /// Revisões antigas ainda contam como quiz feito (não forçar de novo).
-  private static let acceptedRevisions: Set<String> = ["companion-life-v1", "companion-life-v2"]
+  static let revision = "companion-life-v3"
+  /// Só a revisão atual conta — v1/v2 não têm `traits` e devem refazer o quiz.
+  private static let acceptedRevisions: Set<String> = ["companion-life-v3"]
   private static let revKey = "companion.quiz.rev"
 
   static var isCompleted: Bool {
+    // Só a flag explícita — pet/snapshot local antigo NÃO pula o quiz.
     if let rev = UserDefaults.standard.string(forKey: revKey), acceptedRevisions.contains(rev) {
       return true
     }
-    // Já tem pet local → não reabre o quiz
-    if !CompanionLocalStore.load().companions.isEmpty { return true }
-    if CompanionSnapshotStore.load() != nil { return true }
+    if let rev = CompanionAppGroup.defaults.string(forKey: revKey), acceptedRevisions.contains(rev) {
+      return true
+    }
     return false
   }
 
@@ -26,6 +27,48 @@ enum CompanionQuiz {
   static func resetCompleted() {
     UserDefaults.standard.removeObject(forKey: revKey)
     CompanionAppGroup.defaults.removeObject(forKey: revKey)
+    clearSavedTraits()
+  }
+
+  // MARK: - Traits persistidos no aparelho (sobrevivem até o login)
+
+  private static let traitsKey = "companion.quiz.traits.v1"
+
+  static func saveTraits(_ traits: Traits) {
+    let payload = traits.asDictionary
+    if let data = try? JSONSerialization.data(withJSONObject: payload) {
+      UserDefaults.standard.set(data, forKey: traitsKey)
+      CompanionAppGroup.defaults.set(data, forKey: traitsKey)
+    }
+  }
+
+  static func clearSavedTraits() {
+    UserDefaults.standard.removeObject(forKey: traitsKey)
+    CompanionAppGroup.defaults.removeObject(forKey: traitsKey)
+  }
+
+  /// Traits do último quiz (para mandar na cloud no login / sync).
+  static func loadSavedTraitsDictionary() -> [String: Any]? {
+    let data = UserDefaults.standard.data(forKey: traitsKey)
+      ?? CompanionAppGroup.defaults.data(forKey: traitsKey)
+    guard let data,
+          let obj = try? JSONSerialization.jsonObject(with: data),
+          let dict = obj as? [String: Any]
+    else { return nil }
+    return dict
+  }
+
+  /// Traits completos do quiz, ou fallback a partir do archetype do pet.
+  static func traitsDictionaryForSync(archetype: String) -> [String: Any] {
+    if let saved = loadSavedTraitsDictionary() { return saved }
+    return [
+      "archetype": archetype,
+      "vibe": archetype,
+      "focus": archetype,
+      "communicationStyle": archetype,
+      "estiloComunicacao": archetype,
+      "quizRevision": revision,
+    ]
   }
 
   enum Archetype: String, CaseIterable {
@@ -49,6 +92,67 @@ enum CompanionQuiz {
     let skin: String
     let archetype: Archetype
     let blurb: String
+  }
+
+  /// Preferências do quiz persistidas em `Companion.traits` (JSONB).
+  struct Traits: Equatable {
+    var vibe: String
+    var archetype: String
+    var focus: String
+    var communicationStyle: String
+    var quizRevision: String
+    var choiceIds: [String: String]
+
+    /// Payload pronto para PostgREST / JSONSerialization.
+    var asDictionary: [String: Any] {
+      [
+        "vibe": vibe,
+        "archetype": archetype,
+        "focus": focus,
+        "communicationStyle": communicationStyle,
+        "estiloComunicacao": communicationStyle,
+        "quizRevision": quizRevision,
+        "choices": choiceIds,
+      ]
+    }
+  }
+
+  /// Agrupa as respostas do quiz em traits estruturados.
+  static func buildTraits(choices: [Int], draft: Draft) -> Traits {
+    func optionLabel(questionIndex: Int) -> String {
+      guard questionIndex < questions.count,
+            questionIndex < choices.count
+      else { return "" }
+      let opts = questions[questionIndex].options
+      let idx = choices[questionIndex]
+      guard idx >= 0, idx < opts.count else { return "" }
+      return opts[idx].label
+    }
+
+    func shortKey(from label: String, questionId: String) -> String {
+      // Chave estável curta a partir do arquétipo dominante da opção.
+      guard let q = questions.first(where: { $0.id == questionId }),
+            let i = questions.firstIndex(where: { $0.id == questionId }),
+            i < choices.count
+      else { return label }
+      let idx = choices[i]
+      guard idx >= 0, idx < q.options.count else { return label }
+      return q.options[idx].scores.max(by: { $0.value < $1.value })?.key.rawValue ?? label
+    }
+
+    var choiceIds: [String: String] = [:]
+    for (i, q) in questions.enumerated() where i < choices.count {
+      choiceIds[q.id] = shortKey(from: optionLabel(questionIndex: i), questionId: q.id)
+    }
+
+    return Traits(
+      vibe: shortKey(from: optionLabel(questionIndex: 4), questionId: "vibe"),
+      archetype: draft.archetype.rawValue,
+      focus: shortKey(from: optionLabel(questionIndex: 0), questionId: "morning"),
+      communicationStyle: shortKey(from: optionLabel(questionIndex: 2), questionId: "chat"),
+      quizRevision: revision,
+      choiceIds: choiceIds
+    )
   }
 
   static let questions: [Question] = [

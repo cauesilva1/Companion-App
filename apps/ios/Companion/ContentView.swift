@@ -5,7 +5,7 @@ import UIKit
 
 @MainActor
 final class CompanionViewModel: ObservableObject {
-  @Published var snapshot: CompanionSnapshot = .demo
+  @Published var snapshot: CompanionSnapshot = CompanionSnapshotStore.load() ?? .demo
   @Published var reaction: String = "Oi! Vamos brincar?"
   @Published var status: String = "local"
   @Published var isBusy = false
@@ -15,6 +15,9 @@ final class CompanionViewModel: ObservableObject {
   @Published var followUpQueue: [DinoClip] = []
   private var lastGrowthStage: GrowthStage = .baby
   private var growthBootstrapped = false
+  /// Evita refresh do scenePhase brigar com o bootstrap (flip zezinho ↔ pet real).
+  private var isBootstrapping = false
+  private var refreshGeneration = 0
 
   @Published var useLanAPI: Bool = CompanionSnapshotStore.useLanAPI()
   @Published var apiBase: String = CompanionSnapshotStore.savedApiBase() ?? "http://192.168.0.10:3333"
@@ -32,16 +35,25 @@ final class CompanionViewModel: ObservableObject {
   @Published var musicNotifEnabled: Bool = NowPlayingService.musicNotificationsEnabled
   @Published var needsQuiz: Bool = !CompanionQuiz.isCompleted
   @Published var showAccountPrompt = false
+  /// Popup pós-quiz: convida a criar conta para não perder o pet só no telefone.
+  @Published var showSaveOnlinePrompt = false
+  /// Abre LoginView já em modo "Criar conta".
+  @Published var preferRegisterOnLogin = false
   @Published var isLoggedIn: Bool = false
   @Published var accountEmail: String = ""
   @Published var missions: [LocalMission] = MissionCatalog.ensureToday()
   @Published var isHatching = false
   @Published var historyTick: Int = 0
+  /// Evita o refresh puxar um companion antigo da cloud logo após o quiz.
+  private var suppressCloudPullUntil: Date?
   /// Mensagem já enviada ao balão enquanto a LLM responde (input fica limpo).
   @Published var pendingChatUser: String?
+  @Published var thoughtFeed: [ThoughtFeedEntry] = ThoughtFeedStore.load()
+  @Published var openConversationFromWidget = false
 
   let pranks = PrankController()
   private var ambientTask: Task<Void, Never>?
+  private var thoughtTask: Task<Void, Never>?
 
   var usesCloud: Bool {
     isLoggedIn && SupabaseConfig.isConfigured && !useLanAPI
@@ -69,60 +81,152 @@ final class CompanionViewModel: ObservableObject {
   }
 
   func bootstrap() async {
-    // Sempre limpa Island ao abrir (se o app foi fechado, não deve continuar travada).
-    await LiveActivityController.endAll()
+    isBootstrapping = true
+    defer { isBootstrapping = false }
+
     // Sessão persistente: refresh automático ou login anônimo (sem pedir email).
     if let session = await SupabaseClient.shared.ensurePersistentSession() {
       isLoggedIn = true
       accountEmail = session.isAnonymous
         ? "convidado"
         : (session.email.isEmpty ? "conta" : session.email)
+      await CompanionEngine.shared.setCloudAuthoritative(true)
     } else {
       isLoggedIn = false
       accountEmail = ""
+      await CompanionEngine.shared.setCloudAuthoritative(false)
     }
     missions = MissionCatalog.ensureToday()
     missions = MissionCatalog.bump(kind: "OPEN_APP")
+    HouseZoneStore.ensureSeeded()
+    thoughtFeed = ThoughtFeedStore.load()
     NowPlayingService.shared.setEnabled(nowPlayingEnabled)
     _ = await LowEnergyNotifier.requestPermission()
     if nowPlayingEnabled {
       NowPlayingService.shared.refresh()
     }
-    let hasPet = !CompanionLocalStore.load().companions.isEmpty
-      || CompanionSnapshotStore.load() != nil
-    if CompanionQuiz.isCompleted || hasPet {
-      if hasPet && !CompanionQuiz.isCompleted {
-        CompanionQuiz.markCompleted()
+
+    // Preferir pet local real imediatamente (evita flash do demo "zezinho").
+    if let local = Self.bestLocalSnapshot(), !local.isDemoPlaceholder {
+      apply(snapshot: local, reaction: nil)
+    }
+
+    // Cloud-First: se a conta JÁ tem companion, não pede quiz de novo
+    // (mesmo sem coluna traits — login antigo / sync sem traits).
+    if usesCloud {
+      do {
+        if let details = try await SupabaseClient.shared.fetchMyCompanionDetails() {
+          CompanionQuiz.markCompleted()
+          needsQuiz = false
+          companionIdInput = details.snapshot.id
+          _ = await CompanionEngine.shared.adoptCloudSnapshot(details.snapshot)
+          apply(snapshot: details.snapshot, reaction: nil)
+          // Backfill traits mínimos se a row antiga não tiver.
+          if !details.hasTraits {
+            await syncBirthToCloud(details.snapshot, ensureTraits: true)
+          }
+          await refresh()
+          await reloadMissions()
+          await SyncQueue.flush()
+          startAmbientLife()
+          if pranksEnabled { pranks.startAmbient() }
+          CompanionNotifier.scheduleProactive(snapshot: snapshot)
+          await HealthKitStepsService.shared.requestAuthorization()
+          _ = try? await LiveActivityController.startPersistent(snapshot: snapshot)
+          return
+        }
+        // Conta sem pet → quiz (não apaga nada: não há row).
+        if !CompanionQuiz.isCompleted {
+          needsQuiz = true
+          status = "supabase · quiz"
+          return
+        }
+        // Quiz marcado localmente mas cloud vazia → sobe o pet local.
+        needsQuiz = false
+        if let local = Self.bestLocalSnapshot() {
+          apply(snapshot: local, reaction: nil)
+          await syncBirthToCloud(local, ensureTraits: true)
+        }
+        await refresh()
+        await reloadMissions()
+        startAmbientLife()
+        if pranksEnabled { pranks.startAmbient() }
+        return
+      } catch {
+        // Sem rede: se o quiz nunca foi marcado, abre mesmo assim.
+        if !CompanionQuiz.isCompleted {
+          needsQuiz = true
+          status = "supabase offline · quiz"
+          return
+        }
       }
+    }
+
+    if CompanionQuiz.isCompleted {
       needsQuiz = false
-      apply(snapshot: CompanionSnapshotStore.load() ?? .demo, reaction: nil)
+      if let local = Self.bestLocalSnapshot() {
+        apply(snapshot: local, reaction: nil)
+      }
       await refresh()
       await reloadMissions()
       await SyncQueue.flush()
       startAmbientLife()
       if pranksEnabled { pranks.startAmbient() }
       CompanionNotifier.scheduleProactive(snapshot: snapshot)
-      // Só pede email se quiser sync entre aparelhos — anônimo já sincroniza neste device.
+      await HealthKitStepsService.shared.requestAuthorization()
+      _ = try? await LiveActivityController.startPersistent(snapshot: snapshot)
     } else {
       needsQuiz = true
     }
   }
 
-  func finishQuiz(draft: CompanionQuiz.Draft, name: String) async {
-    let snap = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: name)
+  /// Recebe o companion já persistido pelo QuizView (cloud POST com `traits`, ou local standalone).
+  func finishQuiz(created: CompanionSnapshot, draft: CompanionQuiz.Draft) async {
+    // Alinha store local (personality/skin) e depois sobrescreve id/stats com a cloud.
+    _ = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: created.name)
+    var snap = created
+    snap.moodText = draft.blurb
+    _ = await CompanionEngine.shared.adoptCloudSnapshot(snap)
+    if SupabaseConfig.isConfigured {
+      await CompanionEngine.shared.setCloudAuthoritative(true)
+    }
+    companionIdInput = snap.id
     apply(snapshot: snap, reaction: draft.blurb)
     needsQuiz = false
     status = usesCloud ? "supabase" : "standalone"
     isHatching = true
+    suppressCloudPullUntil = Date().addingTimeInterval(45)
     playSprite(.eggMove, queue: [.crack, .hatch, .idle])
+
+    var shouldPromptAccount = SupabaseConfig.isConfigured
     if let session = await SupabaseClient.shared.ensurePersistentSession() {
       isLoggedIn = true
       accountEmail = session.isAnonymous
         ? "convidado"
         : (session.email.isEmpty ? "conta" : session.email)
-      await syncBirthToCloud(snap)
+      shouldPromptAccount = session.isAnonymous || session.email.isEmpty
+        || session.email.lowercased().contains("anonymous")
+      // Garante que a cloud fica com ESTE dino (não o antigo).
+      await syncBirthToCloud(snap, ensureTraits: true)
+    } else {
+      isLoggedIn = false
+      accountEmail = ""
     }
+
     await reloadMissions()
+    _ = try? await LiveActivityController.startPersistent(snapshot: snap)
+
+    if shouldPromptAccount {
+      // Depois do hatch começar, mostra o convite para guardar online.
+      Task { [weak self] in
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        await MainActor.run {
+          self?.preferRegisterOnLogin = true
+          self?.showSaveOnlinePrompt = true
+        }
+      }
+    }
+
     // Ambient só depois do hatch (evita cortar ovo → crack → hatch).
     Task { [weak self] in
       try? await Task.sleep(nanoseconds: 4_500_000_000)
@@ -135,47 +239,70 @@ final class CompanionViewModel: ObservableObject {
   }
 
   func login(email: String, password: String) async throws {
+    // Nunca subir o placeholder "zezinho" — só pet real do store/engine.
+    let localSnap = Self.bestLocalSnapshot() ?? (snapshot.isDemoPlaceholder ? nil : snapshot)
     let session = try await SupabaseClient.shared.signIn(email: email, password: password)
     isLoggedIn = true
     accountEmail = session.email
     status = "supabase"
     showAccountPrompt = false
-    if CompanionQuiz.isCompleted {
-      await syncBirthToCloud(snapshot)
+    preferRegisterOnLogin = false
+
+    Task { [weak self] in
+      guard let self else { return }
+      if let localSnap {
+        await self.syncBirthToCloud(localSnap, ensureTraits: true)
+      }
+      await self.refresh()
+      await self.reloadMissions()
+      await SyncQueue.flush()
     }
-    await refresh()
-    await reloadMissions()
-    await SyncQueue.flush()
   }
 
   func register(email: String, password: String) async throws {
+    let localSnap = Self.bestLocalSnapshot() ?? (snapshot.isDemoPlaceholder ? nil : snapshot)
     let session = try await SupabaseClient.shared.signUp(email: email, password: password)
     isLoggedIn = true
     accountEmail = session.email
     status = "supabase"
     showAccountPrompt = false
-    if CompanionQuiz.isCompleted {
-      await syncBirthToCloud(snapshot)
+    preferRegisterOnLogin = false
+
+    Task { [weak self] in
+      guard let self else { return }
+      if let localSnap {
+        await self.syncBirthToCloud(localSnap, ensureTraits: true)
+      }
+      await self.refresh()
+      await self.reloadMissions()
+      await SyncQueue.flush()
     }
-    await refresh()
-    await reloadMissions()
   }
 
   func logout() {
     Task {
+      // Apaga pet remoto da sessão atual (convidado/email) e limpa o telefone.
+      try? await SupabaseClient.shared.deleteMyCompanions()
       await SupabaseClient.shared.signOut()
-      // Volta pro modo convidado (sessão anônima) em vez de ficar offline.
+      await CompanionEngine.shared.clearAllLocal()
+      CompanionQuiz.resetCompleted()
+      ThoughtFeedStore.clear()
+      await MainActor.run {
+        snapshot = .demo
+        thoughtFeed = []
+        companionIdInput = ""
+        needsQuiz = true
+        reaction = "Conta encerrada. Faça o quiz de novo."
+        status = "logout"
+        isLoggedIn = false
+        accountEmail = ""
+      }
+      // Nova sessão anônima limpa (sem carregar pet antigo).
       if let session = await SupabaseClient.shared.ensurePersistentSession() {
         await MainActor.run {
           isLoggedIn = true
           accountEmail = session.isAnonymous ? "convidado" : session.email
-          status = "supabase"
-        }
-      } else {
-        await MainActor.run {
-          isLoggedIn = false
-          accountEmail = ""
-          status = "standalone"
+          status = "supabase · quiz"
         }
       }
     }
@@ -301,6 +428,9 @@ final class CompanionViewModel: ObservableObject {
   }
 
   func refresh() async {
+    if isBootstrapping { return }
+    refreshGeneration &+= 1
+    let gen = refreshGeneration
     isBusy = true
     defer { isBusy = false }
 
@@ -313,6 +443,7 @@ final class CompanionViewModel: ObservableObject {
         let id = try await resolveLanId()
         companionIdInput = id
         let snap = try await CompanionAPI.shared.fetchState(id: id)
+        guard gen == refreshGeneration else { return }
         apply(snapshot: snap, reaction: "Oi! Vamos brincar?")
       } catch {
         status = "offline"
@@ -323,15 +454,33 @@ final class CompanionViewModel: ObservableObject {
 
     if usesCloud {
       do {
+        // Logo após o quiz, não deixa a cloud antiga sobrescrever o dino novo.
+        if let until = suppressCloudPullUntil, Date() < until {
+          status = "supabase · hatch"
+          return
+        }
         await SyncQueue.flush()
-        if let remote = try await SupabaseClient.shared.fetchMyCompanion() {
+        guard gen == refreshGeneration else { return }
+        await CompanionEngine.shared.setCloudAuthoritative(true)
+        let remote: CompanionSnapshot?
+        if let cloud = try await SupabaseClient.shared.fetchCloudState() {
+          remote = cloud
+        } else {
+          remote = try await SupabaseClient.shared.fetchMyCompanion()
+        }
+        guard gen == refreshGeneration else { return }
+        if let remote, !remote.isDemoPlaceholder {
           companionIdInput = remote.id
           status = "supabase"
+          _ = await CompanionEngine.shared.adoptCloudSnapshot(remote)
           apply(snapshot: remote, reaction: reaction)
+          await LiveActivityController.update(snapshot: remote)
           return
         }
         status = "supabase · sem pet"
-        await syncBirthToCloud(snapshot)
+        if let local = Self.bestLocalSnapshot() {
+          await syncBirthToCloud(local, ensureTraits: true)
+        }
         return
       } catch {
         if case SupabaseError.sessionExpired = error {
@@ -441,6 +590,47 @@ final class CompanionViewModel: ObservableObject {
 
     let message = type == "CHAT" ? chatMessage : (type == "TEASE" ? "conta uma piada" : nil)
 
+    if usesCloud {
+      do {
+        let id = companionIdInput.isEmpty ? snapshot.id : companionIdInput
+        var cloudSnap = try await SupabaseClient.shared.applyInteractionCloud(
+          companionId: id,
+          type: type,
+          message: message
+        )
+        let line = await LLMService.generate(
+          params: .init(
+            name: cloudSnap.name,
+            personality: cloudSnap.archetype,
+            archetype: cloudSnap.archetype,
+            mood: CompanionMood(rawValue: cloudSnap.mood.uppercased()) ?? .CONTENT,
+            energy: cloudSnap.energy,
+            affection: cloudSnap.affection,
+            userMessage: message,
+            history: [],
+            memoryNotes: [],
+            weatherHint: nil,
+            musicHint: NowPlayingService.shared.line,
+            growthStage: Growth.effective(cloudSnap.growthStage).rawValue
+          ),
+          companionId: cloudSnap.id,
+          type: interaction
+        )
+        cloudSnap.moodText = line
+        _ = await CompanionEngine.shared.adoptCloudSnapshot(cloudSnap)
+        if let kind = MissionCatalog.kindFromInteraction(type) {
+          missions = MissionCatalog.bump(kind: kind)
+        }
+        apply(snapshot: cloudSnap, reaction: interaction == .PLAY || interaction == .POKE ? reaction : line)
+        status = "supabase"
+        await LiveActivityController.update(snapshot: cloudSnap)
+        await reloadMissions()
+        return
+      } catch {
+        reaction = error.localizedDescription
+      }
+    }
+
     let (snap, line) = await CompanionEngine.shared.interact(type: interaction, message: message)
     if let kind = MissionCatalog.kindFromInteraction(type) {
       missions = MissionCatalog.bump(kind: kind)
@@ -475,6 +665,19 @@ final class CompanionViewModel: ObservableObject {
 
   func claimMission(_ mission: LocalMission) async {
     guard mission.complete, !mission.claimed else { return }
+    if usesCloud {
+      do {
+        let result = try await SupabaseClient.shared.claimMissionCloud(missionId: mission.id)
+        if let cloud = try await SupabaseClient.shared.fetchCloudState() {
+          _ = await CompanionEngine.shared.adoptCloudSnapshot(cloud)
+          apply(snapshot: cloud, reaction: "Missão concluída! +\(result.rewardEnergy) energia")
+        }
+        await reloadMissions()
+        return
+      } catch {
+        reaction = error.localizedDescription
+      }
+    }
     if let result = MissionCatalog.claim(mission.id) ?? MissionCatalog.claim(mission.kind) {
       missions = result.missions
       var snap = snapshot
@@ -487,12 +690,10 @@ final class CompanionViewModel: ObservableObject {
   }
 
   func startIslandOnLeave() {
-    let track = NowPlayingService.shared.line
-    let line = [reaction, track].compactMap { $0 }.joined(separator: " · ")
     let snap = snapshot
     Task {
       do {
-        _ = try await LiveActivityController.start(snapshot: snap, line: line)
+        _ = try await LiveActivityController.startPersistent(snapshot: snap)
       } catch {
         print("[island] \(error.localizedDescription)")
       }
@@ -517,19 +718,119 @@ final class CompanionViewModel: ObservableObject {
         self.playSprite(clip)
       }
     }
+    startThoughtFeed()
   }
 
-  private func syncBirthToCloud(_ snap: CompanionSnapshot) async {
+  func startThoughtFeed() {
+    thoughtTask?.cancel()
+    thoughtTask = Task { [weak self] in
+      // Primeira fala logo após o boot (canal vivo).
+      try? await Task.sleep(nanoseconds: 1_200_000_000)
+      await self?.emitAutonomousThought(kind: "cloud")
+      while !Task.isCancelled {
+        let delay = UInt64((14.0 + Double.random(in: 0...10)) * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: delay)
+        guard !Task.isCancelled, let self else { return }
+        if self.needsQuiz || self.isHatching { continue }
+        await self.emitAutonomousThought(kind: "mood")
+      }
+    }
+  }
+
+  func emitAutonomousThought(kind: String) async {
+    let zone = HouseZoneStore.resolveActiveZone()
+    let traits = CompanionQuiz.loadSavedTraitsDictionary()
+    let localLine = LocalVoice.autonomousThought(
+      name: snapshot.name,
+      archetype: snapshot.archetype,
+      mood: snapshot.mood,
+      energy: snapshot.energyPercent,
+      zoneName: zone?.name,
+      traits: traits
+    )
+
+    var line = localLine
+    if KeychainStore.hasAnyLLMKey {
+      let vibe = (traits?["vibe"] as? String) ?? snapshot.archetype
+      let focus = (traits?["focus"] as? String) ?? snapshot.archetype
+      let style = (traits?["communicationStyle"] as? String)
+        ?? (traits?["estiloComunicacao"] as? String)
+        ?? snapshot.archetype
+      let zoneHint = zone.map { "Está em \($0.name) (\($0.kind))." } ?? ""
+      let prompt = """
+      Fala curta (1 frase) como pensamento autônomo do companion.
+      Traits: vibe=\(vibe), foco=\(focus), comunicação=\(style).
+      \(zoneHint)
+      Sem aspas. PT-BR.
+      """
+      let generated = await LLMService.generate(
+        params: .init(
+          name: snapshot.name,
+          personality: snapshot.archetype,
+          archetype: snapshot.archetype,
+          mood: CompanionMood(rawValue: snapshot.mood.uppercased()) ?? .CONTENT,
+          energy: snapshot.energy,
+          affection: snapshot.affection,
+          userMessage: prompt,
+          history: [],
+          memoryNotes: [],
+          weatherHint: nil,
+          musicHint: NowPlayingService.shared.line,
+          growthStage: Growth.effective(snapshot.growthStage).rawValue
+        ),
+        companionId: snapshot.id,
+        type: .CHAT
+      )
+      let trimmed = generated.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty { line = trimmed }
+    }
+
+    let entry = ThoughtFeedEntry.make(text: line, kind: kind, zoneName: zone?.name)
+    thoughtFeed = ThoughtFeedStore.append(entry)
+    reaction = line
+    WidgetSpeechStore.saveIdle(line: line, name: snapshot.name)
+    WidgetReloader.reload()
+    historyTick &+= 1
+  }
+
+  private func syncBirthToCloud(_ snap: CompanionSnapshot, ensureTraits: Bool = false) async {
+    // Nunca publicar o placeholder "zezinho" / id demo na cloud.
+    guard !snap.isDemoPlaceholder else {
+      reaction = "Sync ignorado (placeholder local)."
+      return
+    }
     do {
-      let created = try await SupabaseClient.shared.upsertCompanion(snap)
+      let traits: [String: Any]? = ensureTraits
+        ? CompanionQuiz.traitsDictionaryForSync(archetype: snap.archetype)
+        : CompanionQuiz.loadSavedTraitsDictionary()
+      let created = try await SupabaseClient.shared.upsertCompanion(
+        snap,
+        personality: snap.archetype,
+        traits: traits
+      )
       companionIdInput = created.id
       apply(snapshot: created, reaction: "Pet no Supabase ✓")
       status = "supabase"
+      CompanionQuiz.markCompleted()
+      needsQuiz = false
       await reloadMissions()
     } catch {
       SyncQueue.enqueuePushState(snap)
       reaction = "Local ok; sync: \(error.localizedDescription)"
     }
+  }
+
+  /// Pet real no aparelho (store / engine) — nunca o demo.
+  private static func bestLocalSnapshot() -> CompanionSnapshot? {
+    if let stored = CompanionSnapshotStore.load(), !stored.isDemoPlaceholder {
+      return stored
+    }
+    let file = CompanionLocalStore.load()
+    if let first = file.companions.first {
+      let snap = first.toSnapshot()
+      if !snap.isDemoPlaceholder { return snap }
+    }
+    return nil
   }
 
   private func pushCloudAfterLocal(_ snap: CompanionSnapshot) async {
@@ -554,6 +855,11 @@ final class CompanionViewModel: ObservableObject {
   }
 
   private func apply(snapshot: CompanionSnapshot, reaction: String?) {
+    // Não deixa o placeholder "zezinho" sobrescrever o pet real (flip vermelho/amarelo).
+    if snapshot.isDemoPlaceholder, !self.snapshot.isDemoPlaceholder {
+      return
+    }
+
     // Forma base enquanto growth OFF; com ON usa o stage efetivo do snapshot.
     lastGrowthStage = Growth.effective(snapshot.growthStage)
 
@@ -574,7 +880,9 @@ final class CompanionViewModel: ObservableObject {
       self.reaction = reaction
       WidgetSpeechStore.saveIdle(line: reaction, name: snapshot.name)
     }
-    CompanionSnapshotStore.save(snapshot)
+    if !snapshot.isDemoPlaceholder {
+      CompanionSnapshotStore.save(snapshot)
+    }
     WidgetReloader.reload()
     LowEnergyNotifier.check(energyPercent: snapshot.energyPercent, companionName: snapshot.name)
     LonelinessNotifier.check(mood: snapshot.mood, companionName: snapshot.name)
@@ -587,25 +895,16 @@ struct ContentView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var showSettings = false
   @State private var showChat = false
-  @State private var showMissions = false
 
   var body: some View {
     NavigationStack {
       ZStack {
         SkyBackground()
-        ScrollView(showsIndicators: false) {
-          VStack(spacing: 16) {
-            petHero
-            if let track = nowPlaying.line {
-              musicCard(track)
-            }
-            statsCard
-            speechCard
-            actions
-          }
-          .padding(.horizontal, 18)
-          .padding(.top, 12)
-          .padding(.bottom, 28)
+        VStack(spacing: 0) {
+          compactHero
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+          dialogueFeed
         }
       }
       .preferredColorScheme(.light)
@@ -621,22 +920,13 @@ struct ContentView: View {
           .accessibilityLabel("Configuração")
         }
         ToolbarItem(placement: .topBarTrailing) {
-          HStack(spacing: 14) {
-            Button {
-              showMissions = true
-            } label: {
-              Image(systemName: "flag.fill")
-                .foregroundStyle(CompanionTheme.title)
-            }
-            .accessibilityLabel("Missões")
-            Button {
-              showChat = true
-            } label: {
-              Image(systemName: "bubble.left.and.bubble.right.fill")
-                .foregroundStyle(CompanionTheme.title)
-            }
-            .accessibilityLabel("Conversar")
+          Button {
+            showChat = true
+          } label: {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+              .foregroundStyle(CompanionTheme.title)
           }
+          .accessibilityLabel("Conversar")
         }
       }
       .toolbarBackground(.hidden, for: .navigationBar)
@@ -644,16 +934,30 @@ struct ContentView: View {
         SettingsView(model: model)
       }
       .fullScreenCover(isPresented: $model.needsQuiz) {
-        QuizView { draft, name in
-          Task { await model.finishQuiz(draft: draft, name: name) }
+        QuizView { snap, draft in
+          Task { await model.finishQuiz(created: snap, draft: draft) }
         }
+      }
+      .alert("Guardar seu companion online?", isPresented: $model.showSaveOnlinePrompt) {
+        Button("Criar conta") {
+          model.preferRegisterOnLogin = true
+          model.showAccountPrompt = true
+        }
+        Button("Agora não", role: .cancel) {}
+      } message: {
+        Text(
+          "Crie uma conta para guardar \(model.snapshot.name) na nuvem (iPhone, Mac e mesa). Sem conta, ele fica só neste telefone."
+        )
       }
       .sheet(isPresented: $model.showAccountPrompt) {
         NavigationStack {
-          LoginView(model: model)
+          LoginView(model: model, startInRegister: model.preferRegisterOnLogin)
             .toolbar {
               ToolbarItem(placement: .cancellationAction) {
-                Button("Agora não") { model.showAccountPrompt = false }
+                Button("Agora não") {
+                  model.showAccountPrompt = false
+                  model.preferRegisterOnLogin = false
+                }
               }
             }
         }
@@ -663,22 +967,45 @@ struct ContentView: View {
           ChatView(model: model)
         }
       }
-      .sheet(isPresented: $showMissions) {
-        MissionsSheet(model: model)
-      }
       .task { await model.bootstrap() }
+      .onOpenURL { url in
+        // Widget → feed passivo da home; companion://chat abre conversa ativa.
+        let host = url.host?.lowercased() ?? ""
+        if host == "chat" {
+          showChat = true
+        } else if host == "feed" || url.path.contains("feed") {
+          showChat = false
+          showSettings = false
+        }
+      }
+      .onChange(of: model.openConversationFromWidget) { open in
+        if open {
+          showChat = false
+          showSettings = false
+          model.openConversationFromWidget = false
+        }
+      }
       .onReceive(NotificationCenter.default.publisher(for: .companionNowPlayingChanged)) { note in
         if let line = note.userInfo?["line"] as? String, !line.isEmpty {
           model.reaction = line
           WidgetSpeechStore.saveIdle(line: line, name: model.snapshot.name)
+          let entry = ThoughtFeedEntry.make(
+            text: line,
+            kind: "music",
+            zoneName: HouseZoneStore.activeZone()?.name
+          )
+          model.thoughtFeed = ThoughtFeedStore.append(entry)
           WidgetReloader.reload()
         }
       }
       .onChange(of: scenePhase) { phase in
         if phase == .active {
           Task {
-            await LiveActivityController.endAll()
+            try? await Task.sleep(nanoseconds: 400_000_000)
             await SyncQueue.flush()
+            await model.refresh()
+            await HealthKitStepsService.shared.refreshAndIngest()
+            _ = try? await LiveActivityController.startPersistent(snapshot: model.snapshot)
           }
           model.missions = MissionCatalog.ensureToday()
           Task { await model.reloadMissions() }
@@ -688,6 +1015,7 @@ struct ContentView: View {
         if phase == .background, !model.needsQuiz {
           model.startIslandOnLeave()
           CompanionNotifier.scheduleProactive(snapshot: model.snapshot)
+          Task { await HealthKitStepsService.shared.refreshAndIngest() }
         }
       }
       .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
@@ -697,71 +1025,28 @@ struct ContentView: View {
     }
   }
 
-  private var petHero: some View {
-    VStack(spacing: 12) {
+  private var compactHero: some View {
+    HStack(spacing: 14) {
       DinoSpriteView(
         skin: model.snapshot.skin,
         clip: model.spriteClip,
         mood: model.snapshot.mood,
         growthStage: Growth.effective(model.snapshot.growthStage).rawValue,
-        size: 168,
+        size: 88,
         animNonce: model.animNonce,
         followUpQueue: model.followUpQueue,
         onBecameIdle: { model.onSpriteBecameIdle() },
         onClipStarted: { SoundService.playClip($0) }
       )
-      .opacity(model.pranks.hidden ? 0.05 : 1)
-      .scaleEffect(model.pranks.scale)
-      .offset(model.pranks.offset)
-      .animation(.spring(response: 0.28, dampingFraction: 0.55), value: model.pranks.scale)
-      .animation(.easeOut(duration: 0.05), value: model.pranks.offset)
-
-      CompanionCard {
-        VStack(spacing: 4) {
-          Text(model.snapshot.name)
-            .font(.system(size: 32, weight: .bold, design: .rounded))
-            .foregroundStyle(CompanionTheme.title)
-          Text(LocalVoice.archetypeLabel(model.snapshot.archetype))
+      VStack(alignment: .leading, spacing: 8) {
+        Text(model.snapshot.name)
+          .font(.title2.bold())
+          .foregroundStyle(CompanionTheme.title)
+        if let zone = HouseZoneStore.activeZone() {
+          Text(zone.name)
             .font(.caption.weight(.semibold))
             .foregroundStyle(CompanionTheme.play)
-          Text(moodLine)
-            .font(.subheadline)
-            .foregroundStyle(CompanionTheme.subtitle)
-            .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
-      }
-    }
-  }
-
-  private var moodLine: String {
-    let text = model.snapshot.moodText
-    if text.lowercased().contains("feliz") { return "Alegre e cheio de energia!" }
-    return text
-  }
-
-  private func musicCard(_ track: String) -> some View {
-    CompanionCard {
-      HStack(spacing: 10) {
-        Image(systemName: "music.note")
-          .foregroundStyle(CompanionTheme.play)
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Ouvindo")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(CompanionTheme.subtitle)
-          Text(track)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(CompanionTheme.title)
-            .lineLimit(2)
-        }
-        Spacer(minLength: 0)
-      }
-    }
-  }
-
-  private var statsCard: some View {
-    CompanionCard {
-      VStack(spacing: 14) {
         StatBar(
           title: "Energia",
           systemImage: "bolt.fill",
@@ -775,71 +1060,91 @@ struct ContentView: View {
           color: CompanionTheme.affection
         )
       }
+      Spacer(minLength: 0)
+    }
+    .padding(14)
+    .background(
+      RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .fill(Color.white.opacity(0.92))
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+    )
+  }
+
+  private var dialogueFeed: some View {
+    ScrollViewReader { proxy in
+      ScrollView(showsIndicators: false) {
+        LazyVStack(alignment: .leading, spacing: 12) {
+          if let track = nowPlaying.line {
+            feedBanner(icon: "music.note", text: track)
+          }
+          ForEach(model.thoughtFeed.suffix(40)) { entry in
+            feedBubble(entry)
+              .id(entry.id)
+          }
+          if model.thoughtFeed.isEmpty {
+            Text("O canal está vivo — \(model.snapshot.name) fala sozinho conforme o estado na nuvem.")
+              .font(.subheadline)
+              .foregroundStyle(CompanionTheme.subtitle)
+              .padding(.top, 24)
+              .frame(maxWidth: .infinity)
+          }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .padding(.bottom, 28)
+      }
+      .onChange(of: model.thoughtFeed.count) { _ in
+        if let last = model.thoughtFeed.last?.id {
+          withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+        }
+      }
     }
   }
 
-  private var speechCard: some View {
-    CompanionCard {
-      VStack(alignment: .leading, spacing: 6) {
-        Text(model.pranks.line ?? model.reaction)
+  private func feedBanner(icon: String, text: String) -> some View {
+    HStack(spacing: 8) {
+      Image(systemName: icon)
+        .foregroundStyle(CompanionTheme.play)
+      Text(text)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(CompanionTheme.title)
+        .lineLimit(2)
+      Spacer(minLength: 0)
+    }
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 14, style: .continuous)
+        .fill(Color.white.opacity(0.85))
+    )
+  }
+
+  private func feedBubble(_ entry: ThoughtFeedEntry) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      DinoStaticFrame(skin: model.snapshot.skin, size: 36)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(entry.text)
           .font(.body)
           .foregroundStyle(CompanionTheme.title)
           .fixedSize(horizontal: false, vertical: true)
-        Text(Date(), style: .time)
-          .font(.caption2)
-          .foregroundStyle(CompanionTheme.subtitle)
-      }
-    }
-  }
-
-  private var actions: some View {
-    CompanionCard {
-      VStack(spacing: 10) {
-        HStack(spacing: 10) {
-          actionButton("Poke", system: "hand.tap.fill", color: CompanionTheme.poke) {
-            await model.interact("POKE")
+        HStack(spacing: 6) {
+          if let zone = entry.zoneName {
+            Text(zone)
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(CompanionTheme.play)
           }
-          actionButton("Feed", system: "fork.knife", color: CompanionTheme.feed) {
-            await model.interact("FEED")
-          }
-          actionButton("Play", system: "gamecontroller.fill", color: CompanionTheme.play) {
-            await model.interact("PLAY")
-          }
-        }
-        HStack(spacing: 10) {
-          actionButton("Piada", system: "face.smiling.fill", color: CompanionTheme.affection) {
-            await model.interact("TEASE")
-          }
-          actionButton("Falar", system: "bubble.left.fill", color: CompanionTheme.play) {
-            await MainActor.run { showChat = true }
-          }
-          actionButton("Missões", system: "flag.fill", color: CompanionTheme.energy) {
-            await MainActor.run { showMissions = true }
-          }
+          Text(entry.createdAt, style: .time)
+            .font(.caption2)
+            .foregroundStyle(CompanionTheme.subtitle)
         }
       }
+      Spacer(minLength: 0)
     }
-  }
-
-  private func actionButton(_ title: String, system: String, color: Color, action: @escaping () async -> Void) -> some View {
-    Button {
-      Task { await action() }
-    } label: {
-      VStack(spacing: 6) {
-        Image(systemName: system)
-          .font(.title2)
-        Text(title)
-          .font(.caption2.weight(.bold))
-      }
-      .foregroundStyle(.white)
-      .frame(maxWidth: .infinity)
-      .frame(minHeight: 64)
-      .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(color))
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel(title)
-    .disabled(model.isBusy)
-    .opacity(model.isBusy ? 0.75 : 1)
+    .padding(12)
+    .background(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .fill(Color.white.opacity(0.92))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+    )
   }
 }
 

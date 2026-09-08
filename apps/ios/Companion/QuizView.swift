@@ -1,12 +1,16 @@
 import SwiftUI
 
 struct QuizView: View {
-  var onFinished: (CompanionQuiz.Draft, String) -> Void
+  /// Chamado após nascimento local (e cloud, se disponível) com o snapshot a carregar na ContentView.
+  var onFinished: (CompanionSnapshot, CompanionQuiz.Draft) -> Void
 
   @State private var step = 0
   @State private var choices: [Int] = []
   @State private var draft: CompanionQuiz.Draft?
   @State private var nameInput = ""
+  @State private var isSaving = false
+  @State private var errorMessage: String?
+  @FocusState private var nameFocused: Bool
 
   private var questions: [CompanionQuiz.Question] { CompanionQuiz.questions }
   private var isReveal: Bool { step >= questions.count }
@@ -37,6 +41,7 @@ struct QuizView: View {
       }
     }
     .preferredColorScheme(.light)
+    .interactiveDismissDisabled(isSaving)
   }
 
   private var progressRow: some View {
@@ -75,6 +80,7 @@ struct QuizView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(isSaving)
       }
     }
   }
@@ -95,21 +101,44 @@ struct QuizView: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(CompanionTheme.subtitle)
       TextField("Nome do companion", text: $nameInput)
+        .textInputAutocapitalization(.words)
+        .disableAutocorrection(true)
+        .focused($nameFocused)
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.06)))
         .foregroundStyle(CompanionTheme.title)
+        .onAppear {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            nameFocused = true
+          }
+        }
+
+      if let errorMessage {
+        Text(errorMessage)
+          .font(.caption.weight(.medium))
+          .foregroundStyle(Color.red.opacity(0.9))
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
       Button {
-        let name = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        onFinished(draft, name.isEmpty ? draft.name : name)
+        nameFocused = false
+        Task { await finalizeBirth(draft) }
       } label: {
-        Text("Nascer")
-          .font(.headline.weight(.bold))
-          .foregroundStyle(.white)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 14)
-          .background(RoundedRectangle(cornerRadius: 16).fill(CompanionTheme.play))
+        HStack {
+          if isSaving {
+            ProgressView()
+              .tint(.white)
+          }
+          Text(isSaving ? "Nascendo…" : "Nascer")
+            .font(.headline.weight(.bold))
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(CompanionTheme.play.opacity(isSaving ? 0.7 : 1)))
       }
       .buttonStyle(.plain)
+      .disabled(isSaving)
     }
   }
 
@@ -131,5 +160,48 @@ struct QuizView: View {
     } else {
       step = next
     }
+  }
+
+  @MainActor
+  private func finalizeBirth(_ draft: CompanionQuiz.Draft) async {
+    guard !isSaving else { return }
+    isSaving = true
+    errorMessage = nil
+
+    let name = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    let finalName = name.isEmpty ? draft.name : name
+    let traits = CompanionQuiz.buildTraits(choices: choices, draft: draft)
+    // Guarda no aparelho para o login/sync mandar tudo à cloud depois.
+    CompanionQuiz.saveTraits(traits)
+
+    // Sempre permite nascer: tenta cloud; se sessão falhar, nasce local e segue.
+    if SupabaseConfig.isConfigured {
+      let session = await SupabaseClient.shared.ensurePersistentSession()
+      if session != nil {
+        do {
+          let created = try await SupabaseClient.shared.createCompanionFromQuiz(
+            name: finalName,
+            draft: draft,
+            traits: traits
+          )
+          onFinished(created, draft)
+          return
+        } catch {
+          // Auth/rede: não prende o usuário na tela do quiz.
+          let local = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: finalName)
+          SyncQueue.enqueuePushState(local)
+          onFinished(local, draft)
+          return
+        }
+      }
+      // Sem sessão (Anonymous off / rede): nasce local mesmo assim.
+      let local = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: finalName)
+      SyncQueue.enqueuePushState(local)
+      onFinished(local, draft)
+      return
+    }
+
+    let local = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: finalName)
+    onFinished(local, draft)
   }
 }

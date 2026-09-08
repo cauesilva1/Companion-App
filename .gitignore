@@ -63,3 +63,9 @@ coverage/
 **/*.xcuserstate
 .derivedData/
 apps/ios/Companion/Generated/
+
+# Local tooling (Supabase CLI binary)
+.tools/
+
+# Supabase CLI local cache
+supabase/.temp/

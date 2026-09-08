@@ -1,4 +1,5 @@
 import Foundation
+import WidgetKit
 
 /// Payload do widget (App Group): música+comentário ou fala idle.
 struct WidgetSpeechPayload: Codable, Equatable {
@@ -97,5 +98,11 @@ enum WidgetSpeechStore {
         updatedAt: Date()
       )
     )
+  }
+}
+
+enum WidgetReloader {
+  static func reload() {
+    WidgetCenter.shared.reloadAllTimelines()
   }
 }

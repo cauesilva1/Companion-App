@@ -239,15 +239,13 @@ export async function pushCompanionState(patch: {
   affection?: number;
 }) {
   if (!client || !session?.user) return;
+  // Cloud-First: metadata only — energy/affection protected by DB trigger.
   const { error } = await client
     .from("Companion")
     .update({
       name: patch.name,
       skin: patch.skin,
       archetype: patch.archetype,
-      mood: patch.mood,
-      energy: patch.energy,
-      affection: patch.affection,
       personality: patch.archetype,
     })
     .eq("id", patch.id);

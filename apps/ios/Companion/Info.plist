@@ -33,6 +33,15 @@
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Lemos seus passos para alimentar o companion conforme você se move.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>O Companion não grava dados no Health — só lê passos.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Usamos sua localização só para responder perguntas de clima com temperatura real da sua região.</string>
 	<key>CFBundleURLTypes</key>

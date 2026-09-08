@@ -76,4 +76,14 @@ enum KeychainStore {
     delete(.authToken)
     delete(.authEmail)
   }
+
+  /// Apaga todas as chaves do Companion no Keychain (Spotify, Supabase, LLM…).
+  static func clearAll() {
+    for key in Key.allCases {
+      delete(key)
+    }
+  }
 }
+
+extension KeychainStore.Key: CaseIterable {}
+

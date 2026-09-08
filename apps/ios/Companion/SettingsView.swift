@@ -75,9 +75,15 @@ struct SettingsView: View {
               LoginView(model: model)
             }
             .font(.subheadline.weight(.bold))
+            Button("Limpar sessão neste iPhone") { model.logout() }
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.red)
           } else {
             Button("Sair da conta") { model.logout() }
               .foregroundStyle(.red)
+            Text("Sair apaga o companion deste aparelho e o da cloud desta conta, e reabre o quiz.")
+              .font(.caption2)
+              .foregroundStyle(CompanionTheme.subtitle)
           }
         } else {
           NavigationLink("Entrar / criar conta") {

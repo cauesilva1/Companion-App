@@ -11,8 +11,12 @@
 </p>
 
 <p align="center">
-  macOS (Electron) + API Node local
+  Cloud-First (Supabase) · iOS passivo · IoT (ESP32) · Electron legado
 </p>
+
+> **Arquitetura atual:** sobrevivência do dino (decay, missões, presença) vive no **Supabase**
+> (RPCs + Edge Functions + cron). Express/Electron estão em **modo manutenção** — ver
+> [`docs/CLOUD_FIRST.md`](docs/CLOUD_FIRST.md).
 
 ---
 
@@ -65,17 +69,13 @@ Design: widget arredondado, dino à esquerda no céu, painel de ações à direi
 
 ```
 companion-backend/
-├── src/                 # API Express (mock local / LEGACY)
-├── apps/desktop/        # Electron + sync Supabase
-├── apps/ios/            # SwiftUI → Supabase direto
-
-├── prisma/              # schema (opcional; mock sem DB)
-├── apps/desktop/        # popup Electron
-│   ├── electron/        # main / preload / Spotify
-│   └── renderer/        # UI, sprites, sons, céus
-├── apps/ios/            # app SwiftUI + Widget + Dynamic Island
-├── scripts/             # prepare bundle, make-dmg, generate-ios
-├── docs/preview/        # imagens do README
+├── src/                 # Express LEGACY (LLM/voz no pack Mac; sem decay cloud)
+├── supabase/functions/  # Edge: iot-presence, iot-interact, tick-decay, steps-ingest
+├── prisma/              # schema + RPCs survival / IoT
+├── apps/desktop/        # Electron LEGACY (UI fina; sem survival nova)
+├── apps/ios/            # SwiftUI passivo (HealthKit + Live Activity)
+├── scripts/
+├── docs/CLOUD_FIRST.md  # contrato cloud + IoT
 └── data/                # sessão local (gitignored)
 ```
 

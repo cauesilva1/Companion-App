@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LoginView: View {
   @ObservedObject var model: CompanionViewModel
+  var startInRegister: Bool = false
   @State private var email = ""
   @State private var password = ""
   @State private var isRegister = false
@@ -18,7 +19,11 @@ struct LoginView: View {
               Text(isRegister ? "Criar conta" : "Entrar")
                 .font(.title2.bold())
                 .foregroundStyle(CompanionTheme.title)
-              Text("Mesmo email no iPhone e no Mac → mesmo companion.")
+              Text(
+                isRegister
+                  ? "Assim \(model.snapshot.name) fica salvo online — não só neste iPhone."
+                  : "Mesmo email no iPhone e no Mac → mesmo companion."
+              )
                 .font(.subheadline)
                 .foregroundStyle(CompanionTheme.subtitle)
 
@@ -73,20 +78,47 @@ struct LoginView: View {
     .preferredColorScheme(.light)
     .navigationTitle("Conta")
     .navigationBarTitleDisplayMode(.inline)
+    .onAppear {
+      if startInRegister { isRegister = true }
+    }
   }
 
   private func submit() async {
     busy = true
-    defer { busy = false }
     errorText = nil
+    defer { busy = false }
+    let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     do {
-      if isRegister {
-        try await model.register(email: email, password: password)
-      } else {
-        try await model.login(email: email, password: password)
+      try await withTimeout(seconds: 25) {
+        if self.isRegister {
+          try await self.model.register(email: trimmedEmail, password: self.password)
+        } else {
+          try await self.model.login(email: trimmedEmail, password: self.password)
+        }
       }
+      model.preferRegisterOnLogin = false
+    } catch is TimeoutError {
+      errorText = "Demorou demais. Confira a rede e tente de novo."
     } catch {
       errorText = error.localizedDescription
     }
+  }
+}
+
+private struct TimeoutError: Error {}
+
+private func withTimeout<T: Sendable>(
+  seconds: Double,
+  operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+  try await withThrowingTaskGroup(of: T.self) { group in
+    group.addTask { try await operation() }
+    group.addTask {
+      try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+      throw TimeoutError()
+    }
+    guard let result = try await group.next() else { throw TimeoutError() }
+    group.cancelAll()
+    return result
   }
 }

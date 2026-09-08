@@ -368,6 +368,55 @@ enum LocalVoice {
     return "por perto, te esperando"
   }
 
+  /// Fala autônoma passiva (feed / cloud), usando arquétipo + zona + traits.
+  static func autonomousThought(
+    name: String,
+    archetype: String,
+    mood: String,
+    energy: Int,
+    zoneName: String?,
+    traits: [String: Any]?
+  ) -> String {
+    let vibe = (traits?["vibe"] as? String) ?? archetype
+    let focus = (traits?["focus"] as? String) ?? archetype
+    let zone = zoneName ?? "por aqui"
+    let m = mood.uppercased()
+    let pool: [String]
+    switch arch(archetype) {
+    case "preguicoso":
+      pool = [
+        "\(name) boceja em \(zone)… vibe \(vibe).",
+        "Sem pressa. Só existindo em \(zone).",
+        energy < 40 ? "Energia baixa. Sofá chamando." : "Preguiça premium em \(zone).",
+      ]
+    case "carinhoso":
+      pool = [
+        "Saudade batendo em \(zone).",
+        "Pensa em você daqui de \(zone).",
+        m == "LONELY" ? "Tá quieto… quer companhia." : "Afeto no modo \(focus).",
+      ]
+    case "zoeiro":
+      pool = [
+        "Drama leve em \(zone). Aplausos?",
+        "Zoando a vida em \(zone) — vibe \(vibe).",
+        "Se ninguém rir, eu rio sozinho.",
+      ]
+    case "misterioso":
+      pool = [
+        "Em \(zone), observa sem explicar.",
+        "Silêncio útil. Foco: \(focus).",
+        "Algo na sombra de \(zone)…",
+      ]
+    default:
+      pool = [
+        "Curioso com \(zone). O que rolou?",
+        "Investigando o ar em \(zone) — vibe \(vibe).",
+        energy < 45 ? "Precisa de lanche e novidade." : "Ideias novas em \(zone).",
+      ]
+    }
+    return pick(pool)
+  }
+
   static func archetypeLabel(_ raw: String) -> String {
     switch arch(raw) {
     case "curioso": return "Curioso"

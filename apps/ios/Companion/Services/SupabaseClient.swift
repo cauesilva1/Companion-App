@@ -148,20 +148,49 @@ actor SupabaseClient {
 
   var isLoggedIn: Bool { loadSession() != nil }
 
-  /// Sessão utilizável (refresh se preciso). nil se precisa login de novo.
+  /// Confirma no Auth que o user ainda existe (apagar no Dashboard invalida).
+  private func assertUserExists(_ session: SupabaseSession) async throws {
+    _ = try await request(
+      path: "/auth/v1/user",
+      method: "GET",
+      token: session.accessToken,
+      allowRetry: false
+    )
+  }
+
+  /// Sessão utilizável: refresh se preciso + valida no servidor (com cache curto).
+  private var lastUserAssertAt: TimeInterval = 0
+  private var lastUserAssertId: String = ""
+
   func validSession() async -> SupabaseSession? {
     guard var session = loadSession() else { return nil }
-    if !session.isExpiredOrNear { return session }
+    if session.isExpiredOrNear {
+      do {
+        session = try await refreshSession(session)
+      } catch {
+        saveSession(nil)
+        return nil
+      }
+    }
+    let now = Date().timeIntervalSince1970
+    // Evita GET /auth/v1/user em toda chamada (login ficava lento/travado).
+    if session.userId == lastUserAssertId, now - lastUserAssertAt < 45 {
+      return session
+    }
     do {
-      session = try await refreshSession(session)
+      try await assertUserExists(session)
+      lastUserAssertAt = now
+      lastUserAssertId = session.userId
       return session
     } catch {
       saveSession(nil)
+      lastUserAssertAt = 0
+      lastUserAssertId = ""
       return nil
     }
   }
 
-  /// Mantém o usuário na nuvem sem pedir email: refresh ou login anônimo.
+  /// Mantém o usuário na nuvem sem pedir email: refresh/valida ou login anônimo.
   @discardableResult
   func ensurePersistentSession() async -> SupabaseSession? {
     guard SupabaseConfig.isConfigured else { return nil }
@@ -174,12 +203,22 @@ actor SupabaseClient {
     }
   }
 
+  /// Apaga tokens do Keychain neste iPhone (não chama a API de delete user).
+  func clearLocalSession() {
+    saveSession(nil)
+    lastUserAssertAt = 0
+    lastUserAssertId = ""
+  }
+
   /// Cria usuário anônimo (Auth → Providers → Anonymous no dashboard).
   func signInAnonymously() async throws -> SupabaseSession {
     let data = try await request(
       path: "/auth/v1/signup",
       method: "POST",
-      body: ["data": [:] as [String: String]],
+      body: [
+        "data": [:] as [String: String],
+        "gotrue_meta_security": [:] as [String: String],
+      ],
       token: nil,
       allowRetry: false
     )
@@ -240,6 +279,7 @@ actor SupabaseClient {
     guard let url = URL(string: urlString) else { throw SupabaseError.notConfigured }
     var req = URLRequest(url: url)
     req.httpMethod = method
+    req.timeoutInterval = 20
     for (k, v) in authHeaders(token: token) {
       req.setValue(v, forHTTPHeaderField: k)
     }
@@ -367,9 +407,31 @@ actor SupabaseClient {
     var mood: String
     var energy: Int
     var affection: Int
+    var presenceStatus: String?
+    var decayFrozen: Bool?
+    var growthStage: String?
+    /// Presente após quiz v3; ausência = precisa refazer o questionário.
+    var traits: TraitsPayload?
+
+    struct TraitsPayload: Codable {
+      var vibe: String?
+      var archetype: String?
+      var focus: String?
+      var communicationStyle: String?
+    }
+
+    var hasQuizTraits: Bool {
+      guard let traits else { return false }
+      return traits.vibe != nil || traits.archetype != nil || traits.focus != nil
+    }
   }
 
   func fetchMyCompanion() async throws -> CompanionSnapshot? {
+    let details = try await fetchMyCompanionDetails()
+    return details?.snapshot
+  }
+
+  func fetchMyCompanionDetails() async throws -> (snapshot: CompanionSnapshot, hasTraits: Bool)? {
     let session = try await requireSession()
     let data = try await request(
       path: "/rest/v1/Companion",
@@ -379,27 +441,145 @@ actor SupabaseClient {
     )
     let rows = try JSONDecoder().decode([RemoteCompanion].self, from: data)
     guard let row = rows.first else { return nil }
-    return snapshot(from: row)
+    return (snapshot(from: row), row.hasQuizTraits)
   }
 
-  func upsertCompanion(_ snap: CompanionSnapshot, personality: String? = nil) async throws -> CompanionSnapshot {
+  /// Apaga todos os companions do usuário autenticado (quiz de novo / sair da conta).
+  func deleteMyCompanions() async throws {
+    let session = try await requireSession()
+    _ = try await request(
+      path: "/rest/v1/Companion",
+      method: "DELETE",
+      query: "userId=eq.\(session.userId)",
+      token: session.accessToken,
+      prefer: "return=minimal"
+    )
+  }
+
+  /// Cloud-First: lê estado pós-decay via Edge Function.
+  func fetchCloudState() async throws -> CompanionSnapshot? {
+    let session = try await requireSession()
+    let data = try await request(
+      path: "/functions/v1/companion-state",
+      method: "GET",
+      token: session.accessToken
+    )
+    struct Envelope: Codable {
+      var ok: Bool?
+      var companion: RemoteCompanion?
+    }
+    if let env = try? JSONDecoder().decode(Envelope.self, from: data), let row = env.companion {
+      return snapshot(from: row)
+    }
+    return try await fetchMyCompanion()
+  }
+
+  func ingestSteps(_ steps: Int, dayKey: String? = nil) async throws -> (energyDelta: Int, energy: Int) {
+    let session = try await requireSession()
+    var body: [String: Any] = ["steps": steps]
+    if let dayKey { body["dayKey"] = dayKey }
+    let data = try await request(
+      path: "/functions/v1/steps-ingest",
+      method: "POST",
+      body: body,
+      token: session.accessToken
+    )
+    struct Resp: Codable {
+      var energyDelta: Int?
+      var energy: Int?
+    }
+    let resp = try JSONDecoder().decode(Resp.self, from: data)
+    return (resp.energyDelta ?? 0, resp.energy ?? 0)
+  }
+
+  /// Cria o companion após o quiz, persistindo `traits` (JSONB) + `userId` da sessão (Keychain).
+  func createCompanionFromQuiz(
+    name: String,
+    draft: CompanionQuiz.Draft,
+    traits: CompanionQuiz.Traits
+  ) async throws -> CompanionSnapshot {
+    // Garante sessão (refresh ou anônimo) antes do POST.
+    guard let session = await ensurePersistentSession() else {
+      throw SupabaseError.noSession
+    }
+    let userId = KeychainStore.get(.supabaseUserId) ?? session.userId
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime]
+    let now = iso.string(from: Date())
+    let traitsPayload = traits.asDictionary
+
+    // Novo nascimento: não reaproveita row antiga (evita “mesmo dino” após apagar conta / refazer quiz).
+    if let existing = try await fetchMyCompanion() {
+      _ = try await request(
+        path: "/rest/v1/Companion",
+        method: "DELETE",
+        query: "id=eq.\(existing.id)",
+        token: session.accessToken,
+        prefer: "return=minimal"
+      )
+    }
+
+    let id = "cmp_\(UUID().uuidString.prefix(12))"
+    let body: [String: Any] = [
+      "id": id,
+      "userId": userId,
+      "name": name,
+      "personality": draft.personality,
+      "skin": draft.skin,
+      "artStyle": "pixel",
+      "backdrop": "sky",
+      "archetype": draft.archetype.rawValue,
+      "mood": "HAPPY",
+      "energy": 80,
+      "affection": 55,
+      "lastDecayAt": now,
+      "lastInteractionAt": now,
+      "memoryNotes": [] as [String],
+      "traits": traitsPayload,
+      "growthStage": "baby",
+    ]
+    let data = try await request(
+      path: "/rest/v1/Companion",
+      method: "POST",
+      body: body,
+      token: session.accessToken,
+      prefer: "return=representation"
+    )
+    if let rows = try? JSONDecoder().decode([RemoteCompanion].self, from: data), let row = rows.first {
+      return snapshot(from: row)
+    }
+    return CompanionSnapshot(
+      id: id,
+      name: name,
+      mood: "HAPPY",
+      moodText: draft.blurb,
+      energy: 80,
+      affection: 55,
+      skin: draft.skin,
+      archetype: draft.archetype.rawValue,
+      updatedAt: Date(),
+      growthStage: "baby",
+      createdAt: Date(),
+      presenceStatus: "present",
+      decayFrozen: false
+    )
+  }
+
+  func upsertCompanion(_ snap: CompanionSnapshot, personality: String? = nil, traits: [String: Any]? = nil) async throws -> CompanionSnapshot {
     let session = try await requireSession()
     let iso = ISO8601DateFormatter()
     iso.formatOptions = [.withInternetDateTime]
     let now = iso.string(from: Date())
 
     if let existing = try await fetchMyCompanion() {
-      let body: [String: Any] = [
+      // Metadata only — survival columns protected by trigger on server.
+      var body: [String: Any] = [
         "name": snap.name,
         "skin": snap.skin,
         "archetype": snap.archetype,
-        "mood": snap.mood.uppercased(),
-        "energy": Int(snap.energy.rounded()),
-        "affection": Int(snap.affection.rounded()),
         "personality": personality ?? snap.archetype,
-        "lastDecayAt": now,
-        "lastInteractionAt": now,
       ]
+      if let traits { body["traits"] = traits }
       _ = try await request(
         path: "/rest/v1/Companion",
         method: "PATCH",
@@ -408,15 +588,13 @@ actor SupabaseClient {
         token: session.accessToken,
         prefer: "return=minimal"
       )
-      var out = snap
-      out.id = existing.id
-      return out
+      return try await fetchMyCompanion() ?? existing
     }
 
     let id = snap.id == "demo" ? "cmp_\(UUID().uuidString.prefix(12))" : snap.id
-    let body: [String: Any] = [
+    var body: [String: Any] = [
       "id": id,
-      "userId": session.userId,
+      "userId": KeychainStore.get(.supabaseUserId) ?? session.userId,
       "name": snap.name,
       "personality": personality ?? snap.archetype,
       "skin": snap.skin,
@@ -430,6 +608,7 @@ actor SupabaseClient {
       "lastInteractionAt": now,
       "memoryNotes": [] as [String],
     ]
+    if let traits { body["traits"] = traits }
     let data = try await request(
       path: "/rest/v1/Companion",
       method: "POST",
@@ -445,19 +624,14 @@ actor SupabaseClient {
     return out
   }
 
+  /// Thin client: não envia energy/affection (cloud é autoritativa).
   func pushCompanionState(_ snap: CompanionSnapshot) async throws {
     let session = try await requireSession()
-    let iso = ISO8601DateFormatter()
-    iso.formatOptions = [.withInternetDateTime]
     let body: [String: Any] = [
       "name": snap.name,
       "skin": snap.skin,
       "archetype": snap.archetype,
-      "mood": snap.mood.uppercased(),
-      "energy": Int(snap.energy.rounded()),
-      "affection": Int(snap.affection.rounded()),
       "personality": snap.archetype,
-      "lastInteractionAt": iso.string(from: Date()),
     ]
     _ = try await request(
       path: "/rest/v1/Companion",
@@ -467,6 +641,53 @@ actor SupabaseClient {
       token: session.accessToken,
       prefer: "return=minimal"
     )
+  }
+
+  func claimMissionCloud(missionId: String) async throws -> (energy: Int, affection: Int, rewardEnergy: Int) {
+    let session = try await requireSession()
+    let data = try await request(
+      path: "/rest/v1/rpc/missions_claim",
+      method: "POST",
+      body: ["p_mission_id": missionId, "p_user_id": session.userId],
+      token: session.accessToken
+    )
+    struct Claim: Codable {
+      var energy: Int?
+      var affection: Int?
+      var rewardEnergy: Int?
+    }
+    let claim = try JSONDecoder().decode(Claim.self, from: data)
+    return (claim.energy ?? 0, claim.affection ?? 0, claim.rewardEnergy ?? 0)
+  }
+
+  func applyInteractionCloud(companionId: String, type: String, message: String? = nil) async throws -> CompanionSnapshot {
+    let session = try await requireSession()
+    var body: [String: Any] = [
+      "p_companion_id": companionId,
+      "p_type": type.uppercased(),
+      "p_reaction": "…",
+    ]
+    if let message { body["p_message"] = message }
+    let data = try await request(
+      path: "/rest/v1/rpc/companion_apply_interaction",
+      method: "POST",
+      body: body,
+      token: session.accessToken
+    )
+    if let row = try? JSONDecoder().decode(RemoteCompanion.self, from: data) {
+      return snapshot(from: row)
+    }
+    // PostgREST may return array
+    if let rows = try? JSONDecoder().decode([RemoteCompanion].self, from: data), let row = rows.first {
+      return snapshot(from: row)
+    }
+    if let cloud = try await fetchCloudState() {
+      return cloud
+    }
+    if let mine = try await fetchMyCompanion() {
+      return mine
+    }
+    return .demo
   }
 
   struct RemoteMission: Codable {
@@ -598,8 +819,10 @@ actor SupabaseClient {
       skin: row.skin,
       archetype: row.archetype,
       updatedAt: Date(),
-      growthStage: "baby",
-      createdAt: nil
+      growthStage: row.growthStage ?? "baby",
+      createdAt: nil,
+      presenceStatus: row.presenceStatus,
+      decayFrozen: row.decayFrozen
     )
   }
 }

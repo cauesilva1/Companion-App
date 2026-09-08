@@ -4,65 +4,84 @@ import WidgetKit
 
 @MainActor
 enum LiveActivityController {
-  /// Inicia a corrida na Island. Animação no widget via `startedAt` (wall clock).
-  /// Já agenda dismiss — se o app morrer, a Island some sozinha e não fica travada.
+  /// Island congelada — não inicia / atualiza; encerra órfãs.
+  private static var isFrozen: Bool { IslandTiming.animationFrozen }
+
+  /// Presença passiva contínua na Island / Live Activity (status cloud).
   @discardableResult
-  static func start(snapshot: CompanionSnapshot, line: String? = nil) async throws -> String {
+  static func startPersistent(snapshot: CompanionSnapshot, line: String? = nil) async throws -> String {
+    if isFrozen {
+      await endAll()
+      return "frozen"
+    }
     guard ActivityAuthorizationInfo().areActivitiesEnabled else {
       throw LiveActivityError.disabled
     }
 
-    await endAll()
+    let track = NowPlayingService.shared.line ?? ""
+    let statusLine = line
+      ?? presenceLine(snapshot)
+      ?? snapshot.moodText
+    let state = CompanionAttributes.ContentState.status(
+      skin: snapshot.skin,
+      line: statusLine,
+      energy: snapshot.energyPercent,
+      affection: snapshot.affectionPercent,
+      presence: snapshot.presenceStatus ?? "present",
+      track: track
+    )
 
-    let startedAt = Date()
+    if let existing = Activity<CompanionAttributes>.activities.first {
+      let content = ActivityContent(
+        state: state,
+        staleDate: Date().addingTimeInterval(60 * 30),
+        relevanceScore: 90
+      )
+      await existing.update(content)
+      return existing.id
+    }
+
     let attributes = CompanionAttributes(
       companionId: snapshot.id,
       skin: snapshot.skin,
-      startedAt: startedAt
+      startedAt: Date()
     )
-    let track = NowPlayingService.shared.line ?? ""
-    let state = CompanionAttributes.ContentState.from(
-      snapshot: snapshot,
-      line: line,
-      track: track
+    let content = ActivityContent(
+      state: state,
+      staleDate: Date().addingTimeInterval(60 * 30),
+      relevanceScore: 90
     )
-    let dismissAt = startedAt.addingTimeInterval(IslandTiming.total + 0.75)
-    let content = ActivityContent(state: state, staleDate: dismissAt, relevanceScore: 100)
-
     let activity = try Activity.request(
       attributes: attributes,
       content: content,
       pushType: nil
     )
-
-    let alert = AlertConfiguration(
-      title: LocalizedStringResource(stringLiteral: snapshot.name),
-      body: LocalizedStringResource(
-        stringLiteral: line ?? track.nilIfEmpty ?? "Correndo na Island…"
-      ),
-      sound: .default
-    )
-    await activity.update(
-      ActivityContent(state: state, staleDate: dismissAt, relevanceScore: 100),
-      alertConfiguration: alert
-    )
-
-    // Agenda o fim: permanece visível até dismissAt, depois some (mesmo com app morto).
-    await activity.end(content, dismissalPolicy: .after(dismissAt))
-
-    Task { @MainActor in
-      await playIslandSounds(startedAt: startedAt)
-    }
-
     return activity.id
   }
 
+  /// Vignette curta legada (corrida) — preferir `startPersistent` no modo passivo.
+  @discardableResult
+  static func start(snapshot: CompanionSnapshot, line: String? = nil) async throws -> String {
+    try await startPersistent(snapshot: snapshot, line: line)
+  }
+
   static func update(snapshot: CompanionSnapshot, line: String? = nil) async {
+    if isFrozen {
+      await endAll()
+      return
+    }
     let track = NowPlayingService.shared.line ?? ""
-    let state = CompanionAttributes.ContentState.from(snapshot: snapshot, line: line, track: track)
+    let state = CompanionAttributes.ContentState.status(
+      skin: snapshot.skin,
+      line: line ?? presenceLine(snapshot) ?? snapshot.moodText,
+      energy: snapshot.energyPercent,
+      affection: snapshot.affectionPercent,
+      presence: snapshot.presenceStatus ?? "present",
+      track: track
+    )
     let content = ActivityContent(
       state: state,
-      staleDate: Date().addingTimeInterval(60),
+      staleDate: Date().addingTimeInterval(60 * 30),
       relevanceScore: 80
     )
     for act in Activity<CompanionAttributes>.activities {
@@ -70,7 +89,6 @@ enum LiveActivityController {
     }
   }
 
-  /// Encerra tudo na hora (voltar ao app / fechar app).
   static func endAll() async {
     for activity in Activity<CompanionAttributes>.activities {
       let content = ActivityContent(state: activity.content.state, staleDate: nil)
@@ -78,58 +96,23 @@ enum LiveActivityController {
     }
   }
 
-  /// Encerra Islands já expiradas (legado / órfãs).
   static func endExpired() async {
-    for activity in Activity<CompanionAttributes>.activities {
-      if IslandTiming.isExpired(startedAt: activity.attributes.startedAt) {
-        let content = ActivityContent(state: activity.content.state, staleDate: nil)
-        await activity.end(content, dismissalPolicy: .immediate)
-      }
+    if isFrozen {
+      await endAll()
     }
   }
 
-  /// Sons só enquanto o processo do app está vivo (background). Kill = para na hora.
-  private static func playIslandSounds(startedAt: Date) async {
-    let steps = IslandTiming.updateSteps
-    let stepDuration = IslandTiming.total / Double(steps)
-    var lastPhase: IslandTiming.Phase = .run
-    var lastStepSound = Date.distantPast
-
-    for i in 0...steps {
-      if IslandTiming.isExpired(startedAt: startedAt, grace: 0) { return }
-
-      let progress = Double(i) / Double(steps)
-      let phase = IslandTiming.phase(at: progress)
-
-      if phase == .run {
-        let now = Date()
-        if now.timeIntervalSince(lastStepSound) >= 0.22 {
-          SoundService.playStep()
-          lastStepSound = now
-        }
-      } else if phase == .hurt, lastPhase == .run {
-        SoundService.playHurt()
-      }
-      lastPhase = phase
-
-      if i < steps {
-        try? await Task.sleep(nanoseconds: UInt64(stepDuration * 1_000_000_000))
-      }
+  private static func presenceLine(_ snap: CompanionSnapshot) -> String? {
+    switch (snap.presenceStatus ?? "").lowercased() {
+    case "expedition": return "\(snap.name) em expedição (decay pausado)"
+    case "away": return "\(snap.name) está longe da mesa"
+    case "present": return "\(snap.name) na mesa · \(snap.energyPercent)% energia"
+    default: return nil
     }
   }
-}
-
-private extension String {
-  var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 enum LiveActivityError: LocalizedError {
   case disabled
-  var errorDescription: String? { "Live Activities desativadas neste iPhone" }
-}
-
-enum WidgetReloader {
-  static func reload() {
-    WidgetCenter.shared.reloadAllTimelines()
-  }
+  var errorDescription: String? { "Live Activities desativadas" }
 }

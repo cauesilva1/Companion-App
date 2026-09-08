@@ -37,6 +37,9 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
   /// baby | teen | adult — opcional para snapshots antigos
   var growthStage: String?
   var createdAt: Date?
+  /// present | away | expedition (cloud)
+  var presenceStatus: String?
+  var decayFrozen: Bool?
 
   static let demo = CompanionSnapshot(
     id: "demo",
@@ -49,8 +52,15 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
     archetype: "zoeiro",
     updatedAt: Date(),
     growthStage: "baby",
-    createdAt: Date()
+    createdAt: Date(),
+    presenceStatus: "present",
+    decayFrozen: false
   )
+
+  /// Placeholder de UI — nunca sincronizar / nunca preferir sobre pet real.
+  var isDemoPlaceholder: Bool {
+    id == "demo" || id.isEmpty || name.lowercased() == "zezinho"
+  }
 
   var energyPercent: Int { Int(energy.rounded()) }
   var affectionPercent: Int { Int(affection.rounded()) }
@@ -129,6 +139,13 @@ enum CompanionSnapshotStore {
       return snap
     }
     return nil
+  }
+
+  static func clear() {
+    CompanionAppGroup.defaults.removeObject(forKey: CompanionAppGroup.snapshotKey)
+    CompanionAppGroup.defaults.removeObject(forKey: CompanionAppGroup.companionIdKey)
+    UserDefaults.standard.removeObject(forKey: CompanionAppGroup.snapshotKey)
+    UserDefaults.standard.removeObject(forKey: CompanionAppGroup.companionIdKey)
   }
 
   static func savedCompanionId() -> String? {

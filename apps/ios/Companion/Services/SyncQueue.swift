@@ -38,6 +38,7 @@ enum SyncQueue {
         switch item.kind {
         case "push_state":
           let snap = try JSONDecoder().decode(CompanionSnapshot.self, from: item.payload)
+          guard !snap.isDemoPlaceholder else { break }
           try await SupabaseClient.shared.pushCompanionState(snap)
         case "push_missions":
           struct Box: Codable { var dayKey: String; var missions: [LocalMission] }

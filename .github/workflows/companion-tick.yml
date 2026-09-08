@@ -1,0 +1,40 @@
+# Survival pulse: call Edge Function tick-decay every 15 minutes.
+# Secrets (repo Settings → Secrets → Actions):
+#   SUPABASE_URL              e.g. https://zlsrurqfkhspwbzmqimp.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY service_role key (Dashboard → Settings → API)
+# Optional:
+#   CRON_SECRET               if set on the Edge Function secrets
+
+name: companion-tick
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: companion_tick_all via tick-decay
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secrets"
+            exit 1
+          fi
+          URL="${SUPABASE_URL%/}/functions/v1/tick-decay"
+          ARGS=(-sS -X POST "$URL"
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}"
+            -H "Content-Type: application/json"
+            -d '{}')
+          if [ -n "${CRON_SECRET:-}" ]; then
+            ARGS+=(-H "x-cron-secret: ${CRON_SECRET}")
+          fi
+          echo "POST $URL"
+          curl "${ARGS[@]}"
+          echo

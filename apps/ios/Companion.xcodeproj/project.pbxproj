@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D4E5F60000000002 /* HealthKitStepsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60000000001 /* HealthKitStepsService.swift */; };
 		G1R0WTH5W1FT0000000002 /* Growth.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1R0WTH5W1FT0000000001 /* Growth.swift */; };
 		G1R0WTH5W1FT0000000003 /* Growth.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1R0WTH5W1FT0000000001 /* Growth.swift */; };
 		09F547688A60FD849E66E7B2 /* CompanionLockWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 243542F984F39B1ECF738177 /* CompanionLockWidget.swift */; };
@@ -42,6 +43,10 @@
 		B5632C441883C95D181B30DC /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 82260B8B36C1ED13C30AEC0E /* Media.xcassets */; };
 		BA8E91C4C1C4494D93CD622D /* Skies.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A548F2ED3E92116561842BD5 /* Skies.xcassets */; };
 		BABD89CBE907D570CD63B75B /* CompanionSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB17288E6DF34E3A51BCBB1 /* CompanionSnapshot.swift */; };
+		H0U5EZ0NE0000000000002 /* HouseZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = H0U5EZ0NE0000000000001 /* HouseZone.swift */; };
+		H0U5EZ0NE0000000000003 /* HouseZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = H0U5EZ0NE0000000000001 /* HouseZone.swift */; };
+		TH0UGHTFEED0000000002 /* ThoughtFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */; };
+		TH0UGHTFEED0000000003 /* ThoughtFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */; };
 		BC2C2FA023DC31E2496CC7F6 /* CompanionLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A54C64078542203A2C2B0E0 /* CompanionLocalStore.swift */; };
 		BEAC6A1063FEC7F8A334932D /* SkyTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB1C4FE9D5412582C14DE23 /* SkyTheme.swift */; };
 		CB8274E404DE1773E77CFDB6 /* DinoSpriteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF112D33203CC540B067DCF /* DinoSpriteView.swift */; };
@@ -70,6 +75,7 @@
 		C3D4E5F60718293A4B28 /* MissionCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F60718293A4B26 /* MissionCatalog.swift */; };
 		D4E5F60718293A4B31 /* SupabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F60718293A4B30 /* SupabaseClient.swift */; };
 		D4E5F60718293A4B33 /* SyncQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F60718293A4B32 /* SyncQueue.swift */; };
+		F8E1A201FreshInst01 /* FreshInstall.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E1A201FreshInst00 /* FreshInstall.swift */; };
 		D4E5F60718293A4B35 /* NowPlayingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F60718293A4B34 /* NowPlayingService.swift */; };
 		E6F718293A4B5C60D1 /* SpotifyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F718293A4B5C60D0 /* SpotifyService.swift */; };
 		F7A8293B4C5D6E70F1 /* CompanionNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A8293B4C5D6E70F0 /* CompanionNotifier.swift */; };
@@ -103,6 +109,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A1B2C3D4E5F60000000001 /* HealthKitStepsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitStepsService.swift; sourceTree = "<group>"; };
 		07346A7ACE7FC8753F7FAE68 /* Companion.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Companion.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0BEDCE0A9F04EC93E2FFC830 /* CompanionWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionWidgetBundle.swift; sourceTree = "<group>"; };
 		108ED1BB51DA84E5A560FDE0 /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
@@ -117,6 +124,8 @@
 		5C1076E3827ECBDED528FA88 /* CompanionWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CompanionWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		65298F122E53A6CD347ED9EF /* CompanionWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CompanionWidget.entitlements; sourceTree = "<group>"; };
 		6CB17288E6DF34E3A51BCBB1 /* CompanionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSnapshot.swift; sourceTree = "<group>"; };
+		H0U5EZ0NE0000000000001 /* HouseZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseZone.swift; sourceTree = "<group>"; };
+		TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThoughtFeedStore.swift; sourceTree = "<group>"; };
 		6CB1C4FE9D5412582C14DE23 /* SkyTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkyTheme.swift; sourceTree = "<group>"; };
 		6F2D5F5264E21FE47AA20927 /* CompanionLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionLiveActivity.swift; sourceTree = "<group>"; };
 		7F7DFC3564C4ADBC9E072170 /* LocalVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalVoice.swift; sourceTree = "<group>"; };
@@ -156,6 +165,7 @@
 		C3D4E5F60718293A4B26 /* MissionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionCatalog.swift; sourceTree = "<group>"; };
 		D4E5F60718293A4B30 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
 		D4E5F60718293A4B32 /* SyncQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncQueue.swift; sourceTree = "<group>"; };
+		F8E1A201FreshInst00 /* FreshInstall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreshInstall.swift; sourceTree = "<group>"; };
 		D4E5F60718293A4B34 /* NowPlayingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingService.swift; sourceTree = "<group>"; };
 		E6F718293A4B5C60D0 /* SpotifyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyService.swift; sourceTree = "<group>"; };
 		F7A8293B4C5D6E70F0 /* CompanionNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionNotifier.swift; sourceTree = "<group>"; };
@@ -171,6 +181,7 @@
 				A1B2C3D4E5F60718293A4B03 /* LowEnergyNotifier.swift */,
 				C3D4E5F60718293A4B24 /* LonelinessNotifier.swift */,
 				F7A8293B4C5D6E70F0 /* CompanionNotifier.swift */,
+				A1B2C3D4E5F60000000001 /* HealthKitStepsService.swift */,
 				1922CA835BC342A2CFDA5E8C /* LLMService.swift */,
 				D4E5F60718293A4B34 /* NowPlayingService.swift */,
 				E6F718293A4B5C60D0 /* SpotifyService.swift */,
@@ -178,6 +189,7 @@
 				A1B2C3D4E5F60718293A4B01 /* SoundService.swift */,
 				D4E5F60718293A4B30 /* SupabaseClient.swift */,
 				D4E5F60718293A4B32 /* SyncQueue.swift */,
+				F8E1A201FreshInst00 /* FreshInstall.swift */,
 				108ED1BB51DA84E5A560FDE0 /* WeatherService.swift */,
 			);
 			path = Services;
@@ -267,6 +279,8 @@
 				3A54C64078542203A2C2B0E0 /* CompanionLocalStore.swift */,
 				6CB17288E6DF34E3A51BCBB1 /* CompanionSnapshot.swift */,
 				B2C3D4E5F60718293A4B11 /* CompanionQuiz.swift */,
+				H0U5EZ0NE0000000000001 /* HouseZone.swift */,
+				TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */,
 				G1R0WTH5W1FT0000000001 /* Growth.swift */,
 				CFF1AA863BFDD72F7E64F159 /* CompanionTheme.swift */,
 				ECF112D33203CC540B067DCF /* DinoSpriteView.swift */,
@@ -421,6 +435,8 @@
 				69691032CF41C563D0A6DF1D /* CompanionEngine.swift in Sources */,
 				BC2C2FA023DC31E2496CC7F6 /* CompanionLocalStore.swift in Sources */,
 				BABD89CBE907D570CD63B75B /* CompanionSnapshot.swift in Sources */,
+				H0U5EZ0NE0000000000002 /* HouseZone.swift in Sources */,
+				TH0UGHTFEED0000000002 /* ThoughtFeedStore.swift in Sources */,
 				81AFDC6A72EFF6BC2570C47A /* CompanionTheme.swift in Sources */,
 				D5F8003691C60099394679FC /* ContentView.swift in Sources */,
 				CB8274E404DE1773E77CFDB6 /* DinoSpriteView.swift in Sources */,
@@ -434,6 +450,7 @@
 				A1B2C3D4E5F60718293A4B04 /* LowEnergyNotifier.swift in Sources */,
 				C3D4E5F60718293A4B25 /* LonelinessNotifier.swift in Sources */,
 				F7A8293B4C5D6E70F1 /* CompanionNotifier.swift in Sources */,
+				A1B2C3D4E5F60000000002 /* HealthKitStepsService.swift in Sources */,
 				C3D4E5F60718293A4B21 /* LoginView.swift in Sources */,
 				E5F60718293A4B41C1 /* ChatView.swift in Sources */,
 				C3D4E5F60718293A4B27 /* MissionCatalog.swift in Sources */,
@@ -444,6 +461,7 @@
 				C3D4E5F60718293A4B23 /* PrankController.swift in Sources */,
 				D4E5F60718293A4B31 /* SupabaseClient.swift in Sources */,
 				D4E5F60718293A4B33 /* SyncQueue.swift in Sources */,
+				F8E1A201FreshInst01 /* FreshInstall.swift in Sources */,
 				9388960B5FD45BC26F03BA41 /* SettingsView.swift in Sources */,
 				B2C3D4E5F60718293A4B15 /* QuizView.swift in Sources */,
 				B2C3D4E5F60718293A4B12 /* CompanionQuiz.swift in Sources */,
@@ -466,6 +484,8 @@
 				A111233935635EA10DAE8F99 /* CompanionLocalStore.swift in Sources */,
 				09F547688A60FD849E66E7B2 /* CompanionLockWidget.swift in Sources */,
 				A5EF0E710C501AEF59916F76 /* CompanionSnapshot.swift in Sources */,
+				H0U5EZ0NE0000000000003 /* HouseZone.swift in Sources */,
+				TH0UGHTFEED0000000003 /* ThoughtFeedStore.swift in Sources */,
 				2389CDD29831C207F5ADFC45 /* CompanionTheme.swift in Sources */,
 				9ED83EAFBE60409927030C76 /* CompanionWidgetBundle.swift in Sources */,
 				4E9DA2B31045D581169BF422 /* DinoSpriteView.swift in Sources */,
@@ -494,6 +514,7 @@
 		0B38D773D6814E36F24D1DB7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = CompanionWidget/CompanionWidget.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -515,6 +536,7 @@
 		5FFD2BD5689AA32B6B145F30 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = CompanionWidget/CompanionWidget.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -537,6 +559,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = Companion/Companion.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
@@ -560,6 +583,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = Companion/Companion.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;

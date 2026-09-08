@@ -1,11 +1,17 @@
+/**
+ * @deprecated Cloud-First: a fonte de verdade é Postgres RPC + Edge Functions.
+ * Mantido para mock Express / pack Mac (modo manutenção). Spec: survivalSpec.ts
+ */
 import { Mood, InteractionType, Companion } from "@prisma/client";
+import {
+  AFFECTION_DECAY_PER_HOUR,
+  ENERGY_DECAY_PER_HOUR,
+  DECAY_IDLE_GRACE_HOURS,
+  INTERACTION_EFFECTS as SPEC_FX,
+} from "./survivalSpec";
 
 const CLAMP = (value: number, min = 0, max = 100) =>
   Math.max(min, Math.min(max, value));
-
-/** Afeto cai ~2/dia; energia cai ~1 a cada 2h sem interação. */
-const AFFECTION_DECAY_PER_HOUR = 2 / 24;
-const ENERGY_DECAY_PER_HOUR = 0.5;
 
 export interface DecayResult {
   energy: number;
@@ -16,7 +22,7 @@ export interface DecayResult {
 export function applyTimeDecay(companion: Companion, now: Date = new Date()): DecayResult {
   const hoursSinceInteraction =
     (now.getTime() - companion.lastInteractionAt.getTime()) / (1000 * 60 * 60);
-  const hoursIdle = Math.max(0, hoursSinceInteraction - 1);
+  const hoursIdle = Math.max(0, hoursSinceInteraction - DECAY_IDLE_GRACE_HOURS);
 
   const affection = CLAMP(companion.affection - hoursIdle * AFFECTION_DECAY_PER_HOUR);
   const energy = CLAMP(companion.energy - hoursIdle * ENERGY_DECAY_PER_HOUR);
@@ -32,14 +38,7 @@ export function applyTimeDecay(companion: Companion, now: Date = new Date()): De
 const INTERACTION_EFFECTS: Record<
   InteractionType,
   { affection: number; energy: number }
-> = {
-  POKE: { affection: 2, energy: -1 },
-  FEED: { affection: 0, energy: 8 },
-  PLAY: { affection: 6, energy: -4 },
-  CHAT: { affection: 4, energy: -2 },
-  TEASE: { affection: 5, energy: -2 },
-  IGNORE_CHECK: { affection: -4, energy: -2 },
-};
+> = { ...SPEC_FX };
 
 export interface InteractionResult {
   energy: number;

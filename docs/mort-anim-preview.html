@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mort — preview de animações</title>
+  <style>
+    :root {
+      --bg: #e8e8e8;
+      --card: #ffffff;
+      --text: #1a1a1a;
+      --muted: #5a5a5a;
+      --accent: #0b6bcb;
+      --check-a: #ffffff;
+      --check-b: #d0d0d0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px 24px 48px;
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 4px; font-weight: 650; }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px 24px;
+      align-items: center;
+      margin-bottom: 24px;
+      padding: 14px 16px;
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid #ccc;
+    }
+    .controls label { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+    .controls input[type="range"] { width: 140px; }
+    .controls select {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      padding: 6px 10px;
+    }
+    #speedLabel, #scaleLabel { color: var(--accent); font-variant-numeric: tabular-nums; min-width: 3ch; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #ccc;
+    }
+    .card.missing { opacity: 0.45; }
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      background:
+        linear-gradient(45deg, var(--check-b) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--check-b) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--check-b) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--check-b) 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+      background-color: var(--check-a);
+      border-radius: 8px;
+      width: 96px;
+      height: 96px;
+      border: 1px solid #bbb;
+    }
+    .meta { text-align: center; width: 100%; }
+    .name { font-weight: 600; font-size: 0.9rem; }
+    .fps { color: var(--muted); font-size: 0.75rem; margin-top: 2px; }
+    .badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #eee;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .badge.ok { background: #e3f5ea; color: #1a6b3c; }
+    .badge.miss { background: #fde8e8; color: #a33; }
+    .section {
+      margin: 28px 0 12px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Mort — todas as animações</h1>
+  <p class="sub">
+    FPS = valores do app (<code>DINO_CLIPS</code>). Ajuste o multiplicador de velocidade para sentir se precisa ir mais lento ou mais rápido.
+    <strong>Nota:</strong> crescimento visual está desligado no app (só <code>base/</code>); aqui ainda dá para ver teen/adult/evolve para revisão de arte.
+  </p>
+
+  <div class="controls">
+    <label>
+      Fase
+      <select id="stage">
+        <option value="baby">baby (base + extras)</option>
+        <option value="teen" selected>teen</option>
+        <option value="adult">adult</option>
+      </select>
+    </label>
+    <label>
+      Velocidade
+      <input type="range" id="speed" min="0.25" max="2" step="0.05" value="1" />
+      <span id="speedLabel">1.00</span>×
+    </label>
+    <label>
+      Escala
+      <input type="range" id="scale" min="2" max="6" step="1" value="4" />
+      <span id="scaleLabel">4</span>×
+    </label>
+    <label>
+      <input type="checkbox" id="pause" /> Pausar
+    </label>
+  </div>
+
+  <div id="root"></div>
+
+  <script>
+    /** Mesmos FPS do apps/desktop/renderer/renderer.ts */
+    const CLIPS = [
+      { id: "idle", file: "idle.png", fps: 4, stageAware: true },
+      { id: "move", file: "move.png", fps: 8, stageAware: true },
+      { id: "jump", file: "jump.png", fps: 7, stageAware: true },
+      { id: "dash", file: "dash.png", fps: 10, stageAware: true },
+      { id: "hurt", file: "hurt.png", fps: 8, stageAware: true },
+      { id: "kick", file: "kick.png", fps: 8, stageAware: true },
+      { id: "bite", file: "bite.png", fps: 8, stageAware: true },
+      { id: "scan", file: "scan.png", fps: 7, stageAware: true },
+      { id: "avoid", file: "avoid.png", fps: 5, stageAware: true },
+      { id: "sleep", file: "sleep.png", fps: 3, stageAware: true },
+      { id: "look", file: "look.png", fps: 4, stageAware: true },
+      { id: "eat", file: "eat.png", fps: 6, stageAware: true },
+      { id: "eggMove", file: "egg/move.png", fps: 5, stageAware: false },
+      { id: "crack", file: "egg/crack.png", fps: 6, stageAware: false },
+      { id: "hatch", file: "egg/hatch.png", fps: 6, stageAware: false },
+      { id: "evolveBabyTeen", file: "evolve-baby-teen.png", fps: 5, stageAware: false },
+      { id: "evolveTeenAdult", file: "evolve-teen-adult.png", fps: 5, stageAware: false },
+    ];
+
+    const BASE = "/apps/desktop/renderer/assets/dinos/mort";
+
+    function candidates(stage, clip) {
+      if (!clip.stageAware) return [`${BASE}/${clip.file}`];
+      if (stage === "baby") {
+        return [
+          `${BASE}/baby/${clip.file}`,
+          `${BASE}/base/${clip.file}`,
+        ];
+      }
+      return [
+        `${BASE}/${stage}/${clip.file}`,
+        `${BASE}/base/${clip.file}`,
+        `${BASE}/baby/${clip.file}`,
+      ];
+    }
+
+    async function loadFirst(urls) {
+      for (const src of urls) {
+        try {
+          const img = await loadImage(src);
+          return { img, src };
+        } catch {
+          /* next */
+        }
+      }
+      return null;
+    }
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(src));
+        img.src = src;
+      });
+    }
+
+    const players = [];
+    let speedMul = 1;
+    let pause = false;
+    let displayScale = 4;
+
+    function build() {
+      const root = document.getElementById("root");
+      root.innerHTML = "";
+      players.length = 0;
+      const stage = document.getElementById("stage").value;
+
+      const groups = [
+        { title: "Clips de vida / ação", ids: ["idle","move","jump","dash","hurt","kick","bite","scan","avoid","sleep","look","eat"] },
+        { title: "Ovo", ids: ["eggMove","crack","hatch"] },
+        { title: "Evolução", ids: ["evolveBabyTeen","evolveTeenAdult"] },
+      ];
+
+      for (const g of groups) {
+        const h = document.createElement("div");
+        h.className = "section";
+        h.textContent = g.title + " · fase " + stage;
+        root.appendChild(h);
+        const grid = document.createElement("div");
+        grid.className = "grid";
+        root.appendChild(grid);
+
+        for (const id of g.ids) {
+          const clip = CLIPS.find((c) => c.id === id);
+          const card = document.createElement("div");
+          card.className = "card";
+          const canvas = document.createElement("canvas");
+          canvas.width = 24 * displayScale;
+          canvas.height = 24 * displayScale;
+          canvas.style.width = canvas.width + "px";
+          canvas.style.height = canvas.height + "px";
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.innerHTML = `<div class="name">${id}</div><div class="fps">${clip.fps} fps base</div><div class="badge">…</div>`;
+          card.appendChild(canvas);
+          card.appendChild(meta);
+          grid.appendChild(card);
+
+          const player = {
+            clip,
+            canvas,
+            ctx: canvas.getContext("2d"),
+            img: null,
+            frames: 1,
+            frame: 0,
+            acc: 0,
+            badge: meta.querySelector(".badge"),
+            fpsEl: meta.querySelector(".fps"),
+            card,
+          };
+          players.push(player);
+
+          loadFirst(candidates(stage, clip)).then((hit) => {
+            if (!hit) {
+              card.classList.add("missing");
+              player.badge.textContent = "sem asset";
+              player.badge.className = "badge miss";
+              return;
+            }
+            player.img = hit.img;
+            const fh = hit.img.naturalHeight || 24;
+            player.frames = Math.max(1, Math.floor(hit.img.naturalWidth / fh));
+            player.fh = fh;
+            player.fw = fh;
+            const from = hit.src.includes(`/${stage}/`)
+              ? stage
+              : hit.src.includes("/base/")
+                ? "base"
+                : hit.src.includes("/baby/")
+                  ? "baby"
+                  : "root";
+            player.badge.textContent = `${player.frames}f · ${from}`;
+            player.badge.className = "badge ok";
+            draw(player);
+          });
+        }
+      }
+    }
+
+    function draw(p) {
+      const ctx = p.ctx;
+      const s = displayScale;
+      const size = 24 * s;
+      p.canvas.width = size;
+      p.canvas.height = size;
+      p.canvas.style.width = size + "px";
+      p.canvas.style.height = size + "px";
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, size, size);
+      if (!p.img) return;
+      const i = ((p.frame % p.frames) + p.frames) % p.frames;
+      ctx.drawImage(p.img, i * p.fw, 0, p.fw, p.fh, 0, 0, size, size);
+    }
+
+    let last = performance.now();
+    function tick(now) {
+      const dt = (now - last) / 1000;
+      last = now;
+      if (!pause) {
+        for (const p of players) {
+          if (!p.img) continue;
+          const fps = p.clip.fps * speedMul;
+          p.fpsEl.textContent = `${p.clip.fps} fps × ${speedMul.toFixed(2)} = ${fps.toFixed(1)}`;
+          p.acc += dt;
+          const dur = 1 / fps;
+          while (p.acc >= dur) {
+            p.acc -= dur;
+            p.frame += 1;
+          }
+          draw(p);
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+
+    document.getElementById("stage").addEventListener("change", build);
+    document.getElementById("speed").addEventListener("input", (e) => {
+      speedMul = Number(e.target.value);
+      document.getElementById("speedLabel").textContent = speedMul.toFixed(2);
+    });
+    document.getElementById("scale").addEventListener("input", (e) => {
+      displayScale = Number(e.target.value);
+      document.getElementById("scaleLabel").textContent = String(displayScale);
+      for (const p of players) draw(p);
+    });
+    document.getElementById("pause").addEventListener("change", (e) => {
+      pause = e.target.checked;
+    });
+
+    build();
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

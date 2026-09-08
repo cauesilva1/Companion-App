@@ -6,6 +6,11 @@ import ActivityKit
 struct CompanionApp: App {
   @UIApplicationDelegateAdaptor(CompanionAppDelegate.self) private var appDelegate
 
+  init() {
+    // Spotify/Supabase no Keychain sobrevivem ao “Apagar App” — limpa na 1ª abertura.
+    FreshInstall.resetKeychainIfReinstalled()
+  }
+
   var body: some Scene {
     WindowGroup {
       ContentView()
@@ -13,15 +18,14 @@ struct CompanionApp: App {
   }
 }
 
-/// Encerra Live Activities se o sistema notificar término (fechar app).
+/// Encerra Live Activities órfãs — com Island congelada, limpa tudo ao ficar ativo.
 final class CompanionAppDelegate: NSObject, UIApplicationDelegate {
-  func applicationWillTerminate(_ application: UIApplication) {
-    let sem = DispatchSemaphore(value: 0)
+  func applicationDidBecomeActive(_ application: UIApplication) {
     Task { @MainActor in
-      await LiveActivityController.endAll()
-      sem.signal()
+      if IslandTiming.animationFrozen {
+        await LiveActivityController.endAll()
+      }
+      await HealthKitStepsService.shared.refreshAndIngest()
     }
-    // Espera breve para o end disparar antes do processo morrer.
-    _ = sem.wait(timeout: .now() + 0.8)
   }
 }
