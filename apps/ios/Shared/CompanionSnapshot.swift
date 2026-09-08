@@ -37,9 +37,14 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
   /// baby | teen | adult — opcional para snapshots antigos
   var growthStage: String?
   var createdAt: Date?
-  /// present | away | expedition (cloud)
+  /// present | away | expedition — espelho do lifeMode (indoor/work/sleep)
   var presenceStatus: String?
   var decayFrozen: Bool?
+  /// work | indoor | sleep (cloud life mode)
+  var lifeMode: String?
+  var gamingStatus: String?
+  var mediaHint: String?
+  var morningThought: String?
 
   static let demo = CompanionSnapshot(
     id: "demo",
@@ -54,7 +59,11 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
     growthStage: "baby",
     createdAt: Date(),
     presenceStatus: "present",
-    decayFrozen: false
+    decayFrozen: false,
+    lifeMode: "indoor",
+    gamingStatus: nil,
+    mediaHint: nil,
+    morningThought: nil
   )
 
   /// Placeholder de UI — nunca sincronizar / nunca preferir sobre pet real.

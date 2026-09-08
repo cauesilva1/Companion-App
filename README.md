@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  Cloud-First (Supabase) · iOS passivo · IoT (ESP32) · Electron legado
+  Cloud-First (Supabase) · iOS passivo · Electron legado
 </p>
 
 > **Arquitetura atual:** sobrevivência do dino (decay, missões, presença) vive no **Supabase**
@@ -70,12 +70,13 @@ Design: widget arredondado, dino à esquerda no céu, painel de ações à direi
 ```
 companion-backend/
 ├── src/                 # Express LEGACY (LLM/voz no pack Mac; sem decay cloud)
-├── supabase/functions/  # Edge: iot-presence, iot-interact, tick-decay, steps-ingest
-├── prisma/              # schema + RPCs survival / IoT
+├── supabase/functions/  # Edge: companion-state, context-ingest, steps-ingest, tick-decay
+├── prisma/              # schema + RPCs survival / life modes
 ├── apps/desktop/        # Electron LEGACY (UI fina; sem survival nova)
-├── apps/ios/            # SwiftUI passivo (HealthKit + Live Activity)
+├── apps/ios/            # SwiftUI passivo (HealthKit + contexto + Live Activity)
 ├── scripts/
-├── docs/CLOUD_FIRST.md  # contrato cloud + IoT
+├── docs/CLOUD_FIRST.md  # contrato cloud
+├── docs/LIFE_MODES.md   # work / indoor / sleep
 └── data/                # sessão local (gitignored)
 ```
 

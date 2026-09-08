@@ -43,7 +43,7 @@
 		<string>processing</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Usamos sua localização só para responder perguntas de clima com temperatura real da sua região.</string>
+	<string>Usamos localização para clima e, se você autorizar, para identificar a rede Wi‑Fi de casa (modos trabalho/sofá).</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -103,11 +103,14 @@ enum LiveActivityController {
   }
 
   private static func presenceLine(_ snap: CompanionSnapshot) -> String? {
-    switch (snap.presenceStatus ?? "").lowercased() {
-    case "expedition": return "\(snap.name) em expedição (decay pausado)"
-    case "away": return "\(snap.name) está longe da mesa"
-    case "present": return "\(snap.name) na mesa · \(snap.energyPercent)% energia"
-    default: return nil
+    let mode = CompanionLifeMode.parse(snap.lifeMode)
+    switch mode {
+    case .sleep:
+      return "\(snap.name) hibernando · decay pausado"
+    case .work:
+      return "\(snap.name) no campo · \(snap.energyPercent)% energia"
+    case .indoor:
+      return "\(snap.name) em casa · \(snap.energyPercent)% energia"
     }
   }
 }

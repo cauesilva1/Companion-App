@@ -8,7 +8,7 @@ struct HouseZone: Codable, Identifiable, Equatable, Sendable {
   var kind: String
   /// SSID Wi‑Fi opcional para inferir presença futura.
   var ssidHint: String?
-  /// ID do controlador IoT / ESP32 associado (futuro).
+  /// ID lógico do cômodo (futuro: beacon / rede / mapa).
   var controllerId: String?
   var sortOrder: Int
 

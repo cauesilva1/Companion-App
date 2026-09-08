@@ -35,7 +35,11 @@ struct StoredCompanion: Codable, Equatable, Sendable {
       growthStage: Growth.normalize(growthStage).rawValue,
       createdAt: createdAt ?? lastInteractionAt,
       presenceStatus: nil,
-      decayFrozen: nil
+      decayFrozen: nil,
+      lifeMode: LifeModeStore.loadMode().rawValue,
+      gamingStatus: nil,
+      mediaHint: nil,
+      morningThought: nil
     )
   }
 }

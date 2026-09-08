@@ -20,11 +20,35 @@ export const INTERACTION_EFFECTS = {
   IGNORE_CHECK: { affection: -4, energy: -2 },
 } as const;
 
-/** RSSI mínimo (mais próximo de 0 = melhor) para considerar “na mesa”. */
-export const IOT_RSSI_PRESENT_THRESHOLD = -75;
-/** Sem ping de presença → expedition (minutos). */
-export const IOT_PRESENCE_TIMEOUT_MIN = 15;
+/**
+ * PresenceStatus espelha LifeMode (sem ESP32/RSSI):
+ * indoor→present, work→away, sleep→expedition.
+ * Só `decayFrozen` (sleep) pausa o tick.
+ */
+export const PRESENCE_FROM_LIFE_MODE = {
+  indoor: "present",
+  work: "away",
+  sleep: "expedition",
+} as const;
 
 /** Passos HealthKit → +1 energy a cada N passos (cap diário no Edge). */
 export const STEPS_PER_ENERGY = 500;
 export const STEPS_ENERGY_DAILY_CAP = 24;
+
+/**
+ * Life modes (comportamento + LLM). Orthogonal ao PresenceStatus IoT da mesa.
+ * Portado em companion_ingest_context (migration life_modes_context).
+ */
+export const LIFE_MODES = ["work", "indoor", "sleep"] as const;
+export type LifeMode = (typeof LIFE_MODES)[number];
+
+/** Madrugada (hora local America/Sao_Paulo) → candidata a sleep. */
+export const LIFE_SLEEP_HOUR_START = 0;
+export const LIFE_SLEEP_HOUR_END = 6;
+/** Passos recentes abaixo disso + charging/parado → sleep. */
+export const LIFE_SLEEP_STEPS_RECENT_MAX = 80;
+/** Horário comercial para modo trabalho/campo. */
+export const LIFE_WORK_HOUR_START = 7;
+export const LIFE_WORK_HOUR_END = 18;
+/** Passos recentes altos fora de casa → work. */
+export const LIFE_WORK_STEPS_RECENT_MIN = 120;

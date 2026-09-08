@@ -36,11 +36,19 @@ enum MissionKind {
   OPEN_APP
 }
 
-/// Desk / physical presence for IoT + expedition freeze.
+/// Desk / physical presence — legado semântico; agora espelha LifeMode (iOS context).
+/// present = indoor | away = work | expedition = sleep
 enum PresenceStatus {
   present
   away
   expedition
+}
+
+/// Behavioral life context (LLM + decay hibernation). Orthogonal to IoT PresenceStatus.
+enum LifeMode {
+  work
+  indoor
+  sleep
 }
 
 /// Auth local (Express) — desktop fallback quando não usa só Supabase.
@@ -79,9 +87,23 @@ model Companion {
   lastInteractionAt DateTime       @default(now())
   presenceStatus    PresenceStatus @default(present)
   lastPresenceAt    DateTime       @default(now())
-  presenceRssi      Int?
-  /// true when away/expedition — survival tick skips this companion.
+  /// true only in lifeMode sleep — survival tick skips this companion.
   decayFrozen       Boolean        @default(false)
+  /// work | indoor | sleep — computed from phone telemetry (Wi‑Fi, steps, charge, hour).
+  lifeMode          LifeMode       @default(indoor)
+  lifeModeAt        DateTime       @default(now())
+  /// SSID da rede residencial (Sofá/TV) — comparado no ingest.
+  homeWifiSsid      String?
+  xboxGamertag      String?
+  /// Ex.: "online · Forza Horizon 5" (só relevante em indoor).
+  gamingStatus      String?
+  /// Faixa / áudio ativo na sala (Spotify etc.).
+  mediaHint         String?
+  /// Pensamento guardado na hibernação para a 1ª abertura do dia.
+  morningThought    String?
+  morningThoughtDayKey String?
+  contextJson       Json?
+  lastContextAt     DateTime?
   pendingAlert      String?
   memoryNotes       String[]       @default([])
   /// Quiz preferences: vibe, archetype, focus, communicationStyle, …
@@ -91,6 +113,7 @@ model Companion {
 
   @@index([userId])
   @@index([decayFrozen])
+  @@index([lifeMode])
 }
 
 model Interaction {
@@ -124,41 +147,6 @@ model UserMissionProgress {
 
   @@unique([userId, dayKey, kind])
   @@index([userId, dayKey])
-}
-
-model IotDevice {
-  id            String    @id @default(cuid())
-  userId        String
-  deviceKeyHash String
-  label         String    @default("mesa")
-  lastSeenAt    DateTime?
-  revokedAt     DateTime?
-  createdAt     DateTime  @default(now())
-  presenceEvents IotPresenceEvent[]
-  interactEvents IotInteractEvent[]
-
-  @@index([userId])
-  @@index([deviceKeyHash])
-}
-
-model IotPresenceEvent {
-  id        String    @id @default(cuid())
-  deviceId  String
-  device    IotDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  rssi      Int
-  createdAt DateTime  @default(now())
-
-  @@index([deviceId, createdAt])
-}
-
-model IotInteractEvent {
-  id        String    @id @default(cuid())
-  deviceId  String
-  device    IotDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  kind      String
-  createdAt DateTime  @default(now())
-
-  @@index([deviceId, createdAt])
 }
 
 /// Daily HealthKit step ledger (cloud-authoritative feed).

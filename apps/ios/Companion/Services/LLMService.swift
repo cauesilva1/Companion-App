@@ -33,6 +33,8 @@ enum LLMService {
     var weatherHint: String?
     var musicHint: String?
     var growthStage: String = "baby"
+    var lifeMode: String?
+    var gamingStatus: String?
   }
 
   private static var cache: [String: (text: String, at: Date)] = [:]
@@ -264,6 +266,12 @@ enum LLMService {
     }
     if let music = params.musicHint, !music.isEmpty {
       system.append("Usuario pode estar ouvindo: \(music). So comente se a mensagem atual for sobre musica.")
+    }
+    if let life = params.lifeMode, !life.isEmpty {
+      system.append(CompanionLifeMode.parse(life).llmToneHint)
+      if CompanionLifeMode.parse(life) == .indoor, let gaming = params.gamingStatus, !gaming.isEmpty {
+        system.append("Status Xbox agora: \(gaming). Comente so se couber no modo sofá/lazer.")
+      }
     }
 
     var messages: [[String: String]] = [["role": "system", "content": system.joined(separator: " ")]]

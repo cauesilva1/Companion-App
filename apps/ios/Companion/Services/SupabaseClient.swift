@@ -410,6 +410,12 @@ actor SupabaseClient {
     var presenceStatus: String?
     var decayFrozen: Bool?
     var growthStage: String?
+    var lifeMode: String?
+    var gamingStatus: String?
+    var mediaHint: String?
+    var morningThought: String?
+    var homeWifiSsid: String?
+    var xboxGamertag: String?
     /// Presente após quiz v3; ausência = precisa refazer o questionário.
     var traits: TraitsPayload?
 
@@ -467,9 +473,31 @@ actor SupabaseClient {
     struct Envelope: Codable {
       var ok: Bool?
       var companion: RemoteCompanion?
+      var context: ContextPayload?
+    }
+    struct ContextPayload: Codable {
+      var lifeMode: String?
+      var gamingStatus: String?
+      var mediaHint: String?
+      var morningThought: String?
     }
     if let env = try? JSONDecoder().decode(Envelope.self, from: data), let row = env.companion {
-      return snapshot(from: row)
+      var snap = snapshot(from: row)
+      if let ctx = env.context {
+        if let m = ctx.lifeMode { snap.lifeMode = m }
+        if let g = ctx.gamingStatus { snap.gamingStatus = g }
+        if let media = ctx.mediaHint { snap.mediaHint = media }
+        if let morning = ctx.morningThought { snap.morningThought = morning }
+      }
+      if let morning = snap.morningThought, !morning.isEmpty {
+        LifeModeStore.pendingMorningThought = morning
+      }
+      if let mode = snap.lifeMode {
+        LifeModeStore.saveMode(CompanionLifeMode.parse(mode))
+      }
+      if let ssid = row.homeWifiSsid { LifeModeStore.homeWifiSsid = ssid }
+      if let tag = row.xboxGamertag { LifeModeStore.xboxGamertag = tag }
+      return snap
     }
     return try await fetchMyCompanion()
   }
@@ -490,6 +518,57 @@ actor SupabaseClient {
     }
     let resp = try JSONDecoder().decode(Resp.self, from: data)
     return (resp.energyDelta ?? 0, resp.energy ?? 0)
+  }
+
+  struct ContextIngestResult: Codable {
+    var ok: Bool?
+    var lifeMode: String?
+    var lifeModeChanged: Bool?
+    var decayFrozen: Bool?
+    var morningThought: String?
+    var mediaHint: String?
+    var gamingStatus: String?
+    var energy: Int?
+    var affection: Int?
+    var mood: String?
+    var presenceStatus: String?
+  }
+
+  /// Telemetria → lifeMode (work/indoor/sleep) + mídia/Xbox na cloud.
+  func ingestContext(
+    onHomeWifi: Bool?,
+    ssid: String?,
+    stepsToday: Int,
+    stepsRecent: Int,
+    isCharging: Bool,
+    localHour: Int,
+    mediaActive: Bool,
+    mediaHint: String?,
+    homeWifiSsid: String?,
+    xboxGamertag: String?,
+    ackMorning: Bool = false
+  ) async throws -> ContextIngestResult {
+    let session = try await requireSession()
+    var body: [String: Any] = [
+      "stepsToday": stepsToday,
+      "stepsRecent": stepsRecent,
+      "isCharging": isCharging,
+      "localHour": localHour,
+      "mediaActive": mediaActive,
+    ]
+    if let onHomeWifi { body["onHomeWifi"] = onHomeWifi }
+    if let ssid { body["ssid"] = ssid }
+    if let mediaHint { body["mediaHint"] = mediaHint }
+    if let homeWifiSsid { body["homeWifiSsid"] = homeWifiSsid }
+    if let xboxGamertag { body["xboxGamertag"] = xboxGamertag }
+    if ackMorning { body["ackMorning"] = true }
+    let data = try await request(
+      path: "/functions/v1/context-ingest",
+      method: "POST",
+      body: body,
+      token: session.accessToken
+    )
+    return try JSONDecoder().decode(ContextIngestResult.self, from: data)
   }
 
   /// Cria o companion após o quiz, persistindo `traits` (JSONB) + `userId` da sessão (Keychain).
@@ -561,7 +640,11 @@ actor SupabaseClient {
       growthStage: "baby",
       createdAt: Date(),
       presenceStatus: "present",
-      decayFrozen: false
+      decayFrozen: false,
+      lifeMode: "indoor",
+      gamingStatus: nil,
+      mediaHint: nil,
+      morningThought: nil
     )
   }
 
@@ -822,7 +905,11 @@ actor SupabaseClient {
       growthStage: row.growthStage ?? "baby",
       createdAt: nil,
       presenceStatus: row.presenceStatus,
-      decayFrozen: row.decayFrozen
+      decayFrozen: row.decayFrozen,
+      lifeMode: row.lifeMode ?? "indoor",
+      gamingStatus: row.gamingStatus,
+      mediaHint: row.mediaHint,
+      morningThought: row.morningThought
     )
   }
 }

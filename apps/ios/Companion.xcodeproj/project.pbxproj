@@ -45,6 +45,9 @@
 		BABD89CBE907D570CD63B75B /* CompanionSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB17288E6DF34E3A51BCBB1 /* CompanionSnapshot.swift */; };
 		H0U5EZ0NE0000000000002 /* HouseZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = H0U5EZ0NE0000000000001 /* HouseZone.swift */; };
 		H0U5EZ0NE0000000000003 /* HouseZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = H0U5EZ0NE0000000000001 /* HouseZone.swift */; };
+		L1FEM0DE00000000000002 /* LifeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = L1FEM0DE00000000000001 /* LifeMode.swift */; };
+		L1FEM0DE00000000000003 /* LifeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = L1FEM0DE00000000000001 /* LifeMode.swift */; };
+		C0NTEXT000000000000002 /* ContextTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0NTEXT000000000000001 /* ContextTelemetryService.swift */; };
 		TH0UGHTFEED0000000002 /* ThoughtFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */; };
 		TH0UGHTFEED0000000003 /* ThoughtFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */; };
 		BC2C2FA023DC31E2496CC7F6 /* CompanionLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A54C64078542203A2C2B0E0 /* CompanionLocalStore.swift */; };
@@ -125,6 +128,8 @@
 		65298F122E53A6CD347ED9EF /* CompanionWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CompanionWidget.entitlements; sourceTree = "<group>"; };
 		6CB17288E6DF34E3A51BCBB1 /* CompanionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSnapshot.swift; sourceTree = "<group>"; };
 		H0U5EZ0NE0000000000001 /* HouseZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseZone.swift; sourceTree = "<group>"; };
+		L1FEM0DE00000000000001 /* LifeMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeMode.swift; sourceTree = "<group>"; };
+		C0NTEXT000000000000001 /* ContextTelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextTelemetryService.swift; sourceTree = "<group>"; };
 		TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThoughtFeedStore.swift; sourceTree = "<group>"; };
 		6CB1C4FE9D5412582C14DE23 /* SkyTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkyTheme.swift; sourceTree = "<group>"; };
 		6F2D5F5264E21FE47AA20927 /* CompanionLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionLiveActivity.swift; sourceTree = "<group>"; };
@@ -182,6 +187,7 @@
 				C3D4E5F60718293A4B24 /* LonelinessNotifier.swift */,
 				F7A8293B4C5D6E70F0 /* CompanionNotifier.swift */,
 				A1B2C3D4E5F60000000001 /* HealthKitStepsService.swift */,
+				C0NTEXT000000000000001 /* ContextTelemetryService.swift */,
 				1922CA835BC342A2CFDA5E8C /* LLMService.swift */,
 				D4E5F60718293A4B34 /* NowPlayingService.swift */,
 				E6F718293A4B5C60D0 /* SpotifyService.swift */,
@@ -280,6 +286,7 @@
 				6CB17288E6DF34E3A51BCBB1 /* CompanionSnapshot.swift */,
 				B2C3D4E5F60718293A4B11 /* CompanionQuiz.swift */,
 				H0U5EZ0NE0000000000001 /* HouseZone.swift */,
+				L1FEM0DE00000000000001 /* LifeMode.swift */,
 				TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */,
 				G1R0WTH5W1FT0000000001 /* Growth.swift */,
 				CFF1AA863BFDD72F7E64F159 /* CompanionTheme.swift */,
@@ -436,6 +443,7 @@
 				BC2C2FA023DC31E2496CC7F6 /* CompanionLocalStore.swift in Sources */,
 				BABD89CBE907D570CD63B75B /* CompanionSnapshot.swift in Sources */,
 				H0U5EZ0NE0000000000002 /* HouseZone.swift in Sources */,
+				L1FEM0DE00000000000002 /* LifeMode.swift in Sources */,
 				TH0UGHTFEED0000000002 /* ThoughtFeedStore.swift in Sources */,
 				81AFDC6A72EFF6BC2570C47A /* CompanionTheme.swift in Sources */,
 				D5F8003691C60099394679FC /* ContentView.swift in Sources */,
@@ -451,6 +459,7 @@
 				C3D4E5F60718293A4B25 /* LonelinessNotifier.swift in Sources */,
 				F7A8293B4C5D6E70F1 /* CompanionNotifier.swift in Sources */,
 				A1B2C3D4E5F60000000002 /* HealthKitStepsService.swift in Sources */,
+				C0NTEXT000000000000002 /* ContextTelemetryService.swift in Sources */,
 				C3D4E5F60718293A4B21 /* LoginView.swift in Sources */,
 				E5F60718293A4B41C1 /* ChatView.swift in Sources */,
 				C3D4E5F60718293A4B27 /* MissionCatalog.swift in Sources */,
@@ -485,6 +494,7 @@
 				09F547688A60FD849E66E7B2 /* CompanionLockWidget.swift in Sources */,
 				A5EF0E710C501AEF59916F76 /* CompanionSnapshot.swift in Sources */,
 				H0U5EZ0NE0000000000003 /* HouseZone.swift in Sources */,
+				L1FEM0DE00000000000003 /* LifeMode.swift in Sources */,
 				TH0UGHTFEED0000000003 /* ThoughtFeedStore.swift in Sources */,
 				2389CDD29831C207F5ADFC45 /* CompanionTheme.swift in Sources */,
 				9ED83EAFBE60409927030C76 /* CompanionWidgetBundle.swift in Sources */,

@@ -1,5 +1,6 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient, userClient } from "../_shared/supabase.ts";
+import { fetchXboxStatus } from "../_shared/xbox.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -19,14 +20,38 @@ Deno.serve(async (req) => {
     .eq("userId", userData.user.id)
     .order("createdAt", { ascending: true })
     .limit(1);
-  const row = rows?.[0];
+  let row = rows?.[0];
   if (!row) return json({ error: "no_companion" }, 404);
 
   if (!row.decayFrozen) {
     const { data: decayed } = await sb.rpc("companion_apply_decay", {
       p_companion_id: row.id,
     });
-    return json({ ok: true, companion: decayed ?? row });
+    row = decayed ?? row;
   }
-  return json({ ok: true, companion: row });
+
+  // Refresh Xbox presence when indoor (enriquece system prompt / widgets)
+  if (row.lifeMode === "indoor" && row.xboxGamertag) {
+    const xbox = await fetchXboxStatus(String(row.xboxGamertag));
+    if (xbox && xbox.line !== row.gamingStatus) {
+      await sb
+        .from("Companion")
+        .update({ gamingStatus: xbox.line })
+        .eq("id", row.id);
+      row = { ...row, gamingStatus: xbox.line };
+    }
+  }
+
+  return json({
+    ok: true,
+    companion: row,
+    context: {
+      lifeMode: row.lifeMode ?? "indoor",
+      gamingStatus: row.gamingStatus ?? null,
+      mediaHint: row.mediaHint ?? null,
+      morningThought: row.morningThought ?? null,
+      decayFrozen: row.decayFrozen ?? false,
+      presenceStatus: row.presenceStatus ?? "present",
+    },
+  });
 });

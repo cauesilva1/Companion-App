@@ -5,7 +5,7 @@ struct ThoughtFeedEntry: Codable, Identifiable, Equatable, Sendable {
   var id: String
   var text: String
   var createdAt: Date
-  /// mood | presence | music | zone | cloud | chat
+  /// mood | presence | music | zone | cloud | chat | morning
   var kind: String
   var zoneName: String?
 

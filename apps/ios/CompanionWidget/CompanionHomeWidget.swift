@@ -32,6 +32,14 @@ enum CompanionWidgetTimeline {
   }
 
   static func latestLine(for snapshot: CompanionSnapshot) -> String {
+    if let morning = snapshot.morningThought?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !morning.isEmpty {
+      return morning
+    }
+    if let pending = LifeModeStore.pendingMorningThought?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !pending.isEmpty {
+      return pending
+    }
     if let thought = ThoughtFeedStore.latestLine(), !thought.isEmpty {
       return thought
     }
@@ -81,7 +89,7 @@ struct CompanionHomeWidget: Widget {
         .widgetURL(URL(string: "companion://feed"))
     }
     .configurationDisplayName("Companion")
-    .description("Avatar, energia e a última fala.")
+    .description("Avatar, energia e o pensamento do dia.")
     .supportedFamilies([.systemSmall, .systemMedium])
   }
 }

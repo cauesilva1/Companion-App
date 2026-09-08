@@ -368,19 +368,57 @@ enum LocalVoice {
     return "por perto, te esperando"
   }
 
-  /// Fala autônoma passiva (feed / cloud), usando arquétipo + zona + traits.
+  /// Fala autônoma passiva (feed / cloud), usando arquétipo + zona + traits + lifeMode.
   static func autonomousThought(
     name: String,
     archetype: String,
     mood: String,
     energy: Int,
     zoneName: String?,
-    traits: [String: Any]?
+    traits: [String: Any]?,
+    lifeMode: String? = nil,
+    gamingStatus: String? = nil,
+    mediaHint: String? = nil
   ) -> String {
     let vibe = (traits?["vibe"] as? String) ?? archetype
     let focus = (traits?["focus"] as? String) ?? archetype
     let zone = zoneName ?? "por aqui"
+    let mode = CompanionLifeMode.parse(lifeMode)
     let m = mood.uppercased()
+
+    if mode == .sleep {
+      return pick([
+        "\(name) hiberna… pensamento guardado pra amanhã.",
+        "Silêncio da madrugada. Decay pausado.",
+        "Dormindo leve em \(zone).",
+      ])
+    }
+
+    if mode == .work {
+      return pick([
+        "Na rua com você — dia de esforço, vibe \(vibe).",
+        "Passo a passo no campo. Resistência no modo \(focus).",
+        energy < 45 ? "Cansaço batendo, mas segue." : "Ralando fora de casa. Tô junto.",
+        "Fora do sofá: foco no dia presencial.",
+      ])
+    }
+
+    // indoor
+    if let gaming = gamingStatus, gaming.lowercased().contains("online") {
+      return pick([
+        "Xbox ligado: \(gaming). Sofá ativado.",
+        "Te vejo no game — \(gaming).",
+        "Sala em modo console. Eu só assisto… por enquanto.",
+      ])
+    }
+    if let media = mediaHint, !media.isEmpty {
+      return pick([
+        "Som na sala: \(media).",
+        "TV/som rolando. Recuperação modo \(vibe).",
+        "No sofá com trilha: \(media).",
+      ])
+    }
+
     let pool: [String]
     switch arch(archetype) {
     case "preguicoso":

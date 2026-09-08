@@ -143,6 +143,47 @@ struct SettingsView: View {
         Text("Login com a conta Spotify de cada pessoa. YouTube/Safari não liberam a faixa.")
           .font(.caption2)
           .foregroundStyle(CompanionTheme.subtitle)
+
+        Text("Casa / Sofá")
+          .font(.subheadline.weight(.bold))
+          .foregroundStyle(CompanionTheme.title)
+          .padding(.top, 4)
+        Text("SSID da casa: \(LifeModeStore.homeWifiSsid ?? "não definido")")
+          .font(.caption)
+          .foregroundStyle(CompanionTheme.subtitle)
+        Button("Marcar Wi‑Fi atual como casa") {
+          Task {
+            if let ssid = await ContextTelemetryService.shared.captureCurrentSsidAsHome() {
+              model.reaction = "Rede de casa: \(ssid)"
+            } else {
+              model.reaction = "Não li o SSID (precisa permissão de Localização / Wi‑Fi Info). Digite o nome abaixo."
+            }
+          }
+        }
+        .font(.subheadline.weight(.semibold))
+        TextField("SSID da casa (ex: MinhaRede)", text: Binding(
+          get: { LifeModeStore.homeWifiSsid ?? "" },
+          set: { LifeModeStore.homeWifiSsid = $0.isEmpty ? nil : $0 }
+        ))
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        TextField("Gamertag Xbox (opcional)", text: Binding(
+          get: { LifeModeStore.xboxGamertag ?? "" },
+          set: { LifeModeStore.xboxGamertag = $0.isEmpty ? nil : $0 }
+        ))
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        Button("Salvar contexto na cloud") {
+          Task {
+            await ContextTelemetryService.shared.ingestNow()
+            model.reaction = "Contexto enviado · \(ContextTelemetryService.shared.lastLifeMode.labelPT)"
+          }
+        }
+        .font(.subheadline.weight(.bold))
+        Text("Modo agora: \(CompanionLifeMode.parse(model.snapshot.lifeMode).labelPT)")
+          .font(.caption2)
+          .foregroundStyle(CompanionTheme.play)
+
         Toggle("Pegadinhas", isOn: Binding(
           get: { model.pranksEnabled },
           set: { model.setPranks($0) }

@@ -302,7 +302,13 @@ actor CompanionAPI {
       archetype: dto.archetype ?? "curioso",
       updatedAt: Date(),
       growthStage: Growth.normalize(dto.growthStage).rawValue,
-      createdAt: created
+      createdAt: created,
+      presenceStatus: nil,
+      decayFrozen: nil,
+      lifeMode: nil,
+      gamingStatus: nil,
+      mediaHint: nil,
+      morningThought: nil
     )
   }
 }

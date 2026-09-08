@@ -24,9 +24,9 @@ fi
 cd "$ROOT"
 "$SB" link --project-ref "$REF" || true
 
-for fn in iot-register iot-presence iot-interact companion-state tick-decay; do
+for fn in companion-state tick-decay steps-ingest context-ingest; do
   echo "=== deploy $fn ==="
-  "$SB" functions deploy "$fn" --project-ref "$REF"
+  "$SB" functions deploy "$fn" --project-ref "$REF" --use-api
 done
 
 echo "Done. List:"

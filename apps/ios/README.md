@@ -4,10 +4,14 @@ App SwiftUI + WidgetKit + Live Activity. **Cloud-First** (sobrevivência no Supa
 
 ## Modo passivo (atual)
 
-1. Sync / decay / missões: Postgres RPCs + Edge Functions — ver [`docs/CLOUD_FIRST.md`](../../docs/CLOUD_FIRST.md).
-2. HealthKit: passos → `POST /functions/v1/steps-ingest` (alimenta energia).
-3. Live Activity / Dynamic Island: status contínuo (energy / presence), não só vignette ao sair.
-4. IoT (ESP32): presence/interact na mesa — pairing via `iot-register`.
+1. Sync / decay: Postgres RPCs + Edge — [`docs/CLOUD_FIRST.md`](../../docs/CLOUD_FIRST.md).
+2. Life modes (trabalho / sofá / sono): [`docs/LIFE_MODES.md`](../../docs/LIFE_MODES.md) + `POST /context-ingest`.
+3. HealthKit: passos → `POST /functions/v1/steps-ingest`.
+4. Spotify / NowPlaying → `mediaHint` no contexto.
+5. Live Activity: status cloud (energy / lifeMode / presence espelhado).
+6. Home = feed de pensamentos; widgets abrem `companion://feed`.
+
+> IoT ESP32 / pareamento de hardware foi **removido** do produto.
 
 No Mac: `SUPABASE_URL` + `SUPABASE_ANON_KEY` no `.env` → `node scripts/sync-supabase-config.mjs`.
 
@@ -17,7 +21,7 @@ Em Auth → Providers: **Anonymous** ligado. Após migrations: `npx prisma migra
 
 - macOS Sequoia 15+, Xcode, iOS 16.2+
 - Capability HealthKit no target Companion
-- Projeto Supabase com migration `cloud_survival_iot`
+- Projeto Supabase com migrations de survival + life modes
 
 ## Gerar / abrir
 

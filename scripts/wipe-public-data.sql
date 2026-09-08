@@ -1,12 +1,9 @@
--- Wipe app data (public schema)
+-- Wipe app data (public schema) — sem tabelas IoT (removidas)
 TRUNCATE TABLE
-  "IotPresenceEvent",
-  "IotInteractEvent",
   "Interaction",
   "Companion",
   "UserMissionProgress",
   "StepsLedger",
-  "IotDevice",
   "Profile"
 RESTART IDENTITY CASCADE;
 

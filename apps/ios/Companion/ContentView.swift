@@ -475,6 +475,12 @@ final class CompanionViewModel: ObservableObject {
           _ = await CompanionEngine.shared.adoptCloudSnapshot(remote)
           apply(snapshot: remote, reaction: reaction)
           await LiveActivityController.update(snapshot: remote)
+          await ContextTelemetryService.shared.ingestNow()
+          // Re-pull leve se o ingest mudou lifeMode / morningThought
+          if let again = try? await SupabaseClient.shared.fetchCloudState(), !again.isDemoPlaceholder {
+            apply(snapshot: again, reaction: reaction)
+          }
+          await consumeMorningThoughtIfNeeded()
           return
         }
         status = "supabase · sem pet"
@@ -724,43 +730,90 @@ final class CompanionViewModel: ObservableObject {
   func startThoughtFeed() {
     thoughtTask?.cancel()
     thoughtTask = Task { [weak self] in
-      // Primeira fala logo após o boot (canal vivo).
-      try? await Task.sleep(nanoseconds: 1_200_000_000)
+      try? await Task.sleep(nanoseconds: 800_000_000)
+      await ContextTelemetryService.shared.ingestNow()
+      await self?.consumeMorningThoughtIfNeeded()
+      try? await Task.sleep(nanoseconds: 400_000_000)
       await self?.emitAutonomousThought(kind: "cloud")
       while !Task.isCancelled {
-        let delay = UInt64((14.0 + Double.random(in: 0...10)) * 1_000_000_000)
+        let mode = CompanionLifeMode.parse(self?.snapshot.lifeMode)
+        // Em sleep, não spam de pensamentos — só hiberna.
+        let delaySec = mode == .sleep ? 120.0 : (14.0 + Double.random(in: 0...10))
+        let delay = UInt64(delaySec * 1_000_000_000)
         try? await Task.sleep(nanoseconds: delay)
         guard !Task.isCancelled, let self else { return }
         if self.needsQuiz || self.isHatching { continue }
+        if CompanionLifeMode.parse(self.snapshot.lifeMode) == .sleep { continue }
+        await ContextTelemetryService.shared.ingestNow()
         await self.emitAutonomousThought(kind: "mood")
       }
     }
   }
 
+  /// Injeta o pensamento matinal guardado na cloud na 1ª abertura do dia.
+  func consumeMorningThoughtIfNeeded() async {
+    let line = snapshot.morningThought
+      ?? LifeModeStore.pendingMorningThought
+    guard let line, !line.isEmpty else { return }
+    let already = thoughtFeed.contains { $0.kind == "morning" && $0.text == line }
+    if !already {
+      let entry = ThoughtFeedEntry.make(
+        text: line,
+        kind: "morning",
+        zoneName: HouseZoneStore.activeZone()?.name
+      )
+      thoughtFeed = ThoughtFeedStore.append(entry)
+      reaction = line
+      WidgetSpeechStore.saveIdle(line: line, name: snapshot.name)
+      WidgetReloader.reload()
+    }
+    LifeModeStore.pendingMorningThought = nil
+    // Ack na cloud (limpa morningThought após consumir)
+    _ = try? await SupabaseClient.shared.ingestContext(
+      onHomeWifi: nil,
+      ssid: nil,
+      stepsToday: HealthKitStepsService.shared.todaySteps,
+      stepsRecent: 0,
+      isCharging: false,
+      localHour: Calendar.current.component(.hour, from: Date()),
+      mediaActive: false,
+      mediaHint: nil,
+      homeWifiSsid: LifeModeStore.homeWifiSsid,
+      xboxGamertag: LifeModeStore.xboxGamertag,
+      ackMorning: true
+    )
+  }
+
   func emitAutonomousThought(kind: String) async {
     let zone = HouseZoneStore.resolveActiveZone()
     let traits = CompanionQuiz.loadSavedTraitsDictionary()
+    let mode = CompanionLifeMode.parse(snapshot.lifeMode ?? LifeModeStore.loadMode().rawValue)
     let localLine = LocalVoice.autonomousThought(
       name: snapshot.name,
       archetype: snapshot.archetype,
       mood: snapshot.mood,
       energy: snapshot.energyPercent,
       zoneName: zone?.name,
-      traits: traits
+      traits: traits,
+      lifeMode: mode.rawValue,
+      gamingStatus: snapshot.gamingStatus,
+      mediaHint: snapshot.mediaHint ?? NowPlayingService.shared.line
     )
 
     var line = localLine
-    if KeychainStore.hasAnyLLMKey {
+    if KeychainStore.hasAnyLLMKey, mode != .sleep {
       let vibe = (traits?["vibe"] as? String) ?? snapshot.archetype
       let focus = (traits?["focus"] as? String) ?? snapshot.archetype
       let style = (traits?["communicationStyle"] as? String)
         ?? (traits?["estiloComunicacao"] as? String)
         ?? snapshot.archetype
       let zoneHint = zone.map { "Está em \($0.name) (\($0.kind))." } ?? ""
+      let gamingHint = (mode == .indoor ? snapshot.gamingStatus : nil).map { "Xbox: \($0)." } ?? ""
       let prompt = """
       Fala curta (1 frase) como pensamento autônomo do companion.
+      LifeMode: \(mode.rawValue). \(mode.llmToneHint)
       Traits: vibe=\(vibe), foco=\(focus), comunicação=\(style).
-      \(zoneHint)
+      \(zoneHint) \(gamingHint)
       Sem aspas. PT-BR.
       """
       let generated = await LLMService.generate(
@@ -775,8 +828,10 @@ final class CompanionViewModel: ObservableObject {
           history: [],
           memoryNotes: [],
           weatherHint: nil,
-          musicHint: NowPlayingService.shared.line,
-          growthStage: Growth.effective(snapshot.growthStage).rawValue
+          musicHint: mode == .indoor ? NowPlayingService.shared.line : nil,
+          growthStage: Growth.effective(snapshot.growthStage).rawValue,
+          lifeMode: mode.rawValue,
+          gamingStatus: mode == .indoor ? snapshot.gamingStatus : nil
         ),
         companionId: snapshot.id,
         type: .CHAT
@@ -946,7 +1001,7 @@ struct ContentView: View {
         Button("Agora não", role: .cancel) {}
       } message: {
         Text(
-          "Crie uma conta para guardar \(model.snapshot.name) na nuvem (iPhone, Mac e mesa). Sem conta, ele fica só neste telefone."
+          "Crie uma conta para guardar \(model.snapshot.name) na nuvem (iPhone e Mac). Sem conta, ele fica só neste telefone."
         )
       }
       .sheet(isPresented: $model.showAccountPrompt) {
@@ -1005,6 +1060,7 @@ struct ContentView: View {
             await SyncQueue.flush()
             await model.refresh()
             await HealthKitStepsService.shared.refreshAndIngest()
+            await ContextTelemetryService.shared.ingestNow()
             _ = try? await LiveActivityController.startPersistent(snapshot: model.snapshot)
           }
           model.missions = MissionCatalog.ensureToday()
@@ -1047,6 +1103,9 @@ struct ContentView: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(CompanionTheme.play)
         }
+        Text(CompanionLifeMode.parse(model.snapshot.lifeMode).labelPT)
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(CompanionTheme.subtitle)
         StatBar(
           title: "Energia",
           systemImage: "bolt.fill",
