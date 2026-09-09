@@ -174,31 +174,21 @@ struct QuizView: View {
     // Guarda no aparelho para o login/sync mandar tudo à cloud depois.
     CompanionQuiz.saveTraits(traits)
 
-    // Sempre permite nascer: tenta cloud; se sessão falhar, nasce local e segue.
+    // Conta autenticada obrigatória para nascer na cloud (sem anônimo).
     if SupabaseConfig.isConfigured {
-      let session = await SupabaseClient.shared.ensurePersistentSession()
-      if session != nil {
-        do {
-          let created = try await SupabaseClient.shared.createCompanionFromQuiz(
-            name: finalName,
-            draft: draft,
-            traits: traits
-          )
-          onFinished(created, draft)
-          return
-        } catch {
-          // Auth/rede: não prende o usuário na tela do quiz.
-          let local = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: finalName)
-          SyncQueue.enqueuePushState(local)
-          onFinished(local, draft)
-          return
-        }
+      do {
+        let created = try await SupabaseClient.shared.createCompanionFromQuiz(
+          name: finalName,
+          draft: draft,
+          traits: traits
+        )
+        onFinished(created, draft)
+        return
+      } catch {
+        errorMessage = error.localizedDescription
+        isSaving = false
+        return
       }
-      // Sem sessão (Anonymous off / rede): nasce local mesmo assim.
-      let local = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: finalName)
-      SyncQueue.enqueuePushState(local)
-      onFinished(local, draft)
-      return
     }
 
     let local = await CompanionEngine.shared.birthFromQuiz(draft: draft, name: finalName)

@@ -18,11 +18,38 @@ final class LocationHelper: NSObject, CLLocationManagerDelegate {
 
   private let manager = CLLocationManager()
   private var continuation: CheckedContinuation<CLLocation, Error>?
+  private var authContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
 
   private override init() {
     super.init()
     manager.delegate = self
     manager.desiredAccuracy = kCLLocationAccuracyKilometer
+  }
+
+  /// Só pede When In Use (necessário para ler SSID via NEHotspotNetwork).
+  @discardableResult
+  func ensureWhenInUseAuthorized() async -> CLAuthorizationStatus {
+    let status = manager.authorizationStatus
+    switch status {
+    case .authorizedWhenInUse, .authorizedAlways:
+      return status
+    case .denied, .restricted:
+      return status
+    case .notDetermined:
+      return await withCheckedContinuation { cont in
+        self.authContinuation = cont
+        manager.requestWhenInUseAuthorization()
+      }
+    @unknown default:
+      return status
+    }
+  }
+
+  var isWhenInUseAuthorized: Bool {
+    switch manager.authorizationStatus {
+    case .authorizedWhenInUse, .authorizedAlways: return true
+    default: return false
+    }
   }
 
   func request() async throws -> CLLocation {
@@ -42,8 +69,19 @@ final class LocationHelper: NSObject, CLLocationManagerDelegate {
   }
 
   func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    let status = manager.authorizationStatus
+    if let authCont = authContinuation {
+      switch status {
+      case .notDetermined:
+        break
+      default:
+        authContinuation = nil
+        authCont.resume(returning: status)
+      }
+    }
+
     guard continuation != nil else { return }
-    switch manager.authorizationStatus {
+    switch status {
     case .authorizedWhenInUse, .authorizedAlways:
       manager.requestLocation()
     case .denied, .restricted:

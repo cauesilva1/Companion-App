@@ -11,8 +11,9 @@ enum LocalVoice {
     list.randomElement() ?? (list.first ?? "…")
   }
 
-  private static func clipByStage(_ text: String, growthStage: String?) -> String {
-    let max = Growth.wordLimit(for: Growth.normalize(growthStage))
+  private static func clipByStage(_ text: String, growthStage: String?, energy: Double = 70) -> String {
+    // Chat/local: usa limite conversacional — growth OFF não pode cortar em 10 palavras.
+    let max = Growth.chatWordLimit(energy: energy)
     let words = text.split { $0.isWhitespace || $0.isNewline }.map(String.init)
     if words.count <= max { return text.trimmingCharacters(in: .whitespacesAndNewlines) }
     return words.prefix(max).joined(separator: " ")
@@ -61,35 +62,28 @@ enum LocalVoice {
     mood: CompanionMood,
     type: InteractionType,
     userMessage: String? = nil,
-    growthStage: String? = "baby"
+    growthStage: String? = "baby",
+    energy: Double = 70
   ) -> String {
     let a = arch(archetype)
-    func out(_ text: String) -> String { clipByStage(text, growthStage: growthStage) }
+    func out(_ text: String) -> String { clipByStage(text, growthStage: growthStage, energy: energy) }
+    let energyPct = Int(energy.rounded())
+
+    if type == .CHAT, energyPct < 40 {
+      return out(tiredChat(
+        name: name,
+        archetype: a,
+        userMessage: userMessage,
+        energy: energyPct,
+        growthStage: growthStage
+      ))
+    }
 
     if type == .CHAT, let msg = userMessage?.lowercased() {
       if msg.range(of: #"como (voce|você) (esta|está)|tudo bem|td bem|e ai|e aí"#, options: .regularExpression) != nil {
         return out(howAreYou(arch: a, mood: mood))
       }
       if msg.range(of: #"oi|olá|ola|hey|eae"#, options: .regularExpression) != nil {
-        let stage = Growth.normalize(growthStage)
-        if stage == .baby {
-          return out(pick(lines([
-            "curioso": ["Oi! Sou \(name)!", "Oi oi! O que rolou?"],
-            "preguicoso": ["Oi... sem pressa.", "Fala... tô aqui."],
-            "carinhoso": ["Oi! Senti você!", "Olá! Chega!"],
-            "zoeiro": ["Eae!", "Oi! Já ia zoar."],
-            "misterioso": ["Oi.", "Você chegou."],
-          ], a)))
-        }
-        if stage == .adult {
-          return out(pick(lines([
-            "curioso": ["Oi. Sou \(name) — me conta o dia.", "E aí. Quero novidade de verdade."],
-            "preguicoso": ["Oi. Sem pressa, como sempre.", "\(name) online. Quase produtivo."],
-            "carinhoso": ["Oi. Que bom ouvir você.", "Olá. Fica um pouco?"],
-            "zoeiro": ["Eae. Aprontou o quê hoje?", "Oi. Já ia te zoar com carinho."],
-            "misterioso": ["Saudações. Eu esperava você.", "Você chegou. Eu sabia."],
-          ], a)))
-        }
         return out(pick(lines([
           "curioso": ["Oi! Sou \(name). O que rolou?", "E aí! Me atualiza."],
           "preguicoso": ["Oi... sem pressa.", "Fala. \(name) tá online. Quase."],
@@ -110,7 +104,7 @@ enum LocalVoice {
     }
 
     if type == .CHAT, let msg = userMessage?.trimmingCharacters(in: .whitespacesAndNewlines), !msg.isEmpty {
-      return out(anchoredChat(name: name, archetype: a, userMessage: msg, growthStage: growthStage))
+      return out(anchoredChat(name: name, archetype: a, userMessage: msg, growthStage: growthStage, energy: energyPct))
     }
 
     if type == .PLAY {
@@ -148,10 +142,73 @@ enum LocalVoice {
     }
 
     if type == .CHAT {
-      return out(anchoredChat(name: name, archetype: a, userMessage: userMessage, growthStage: growthStage))
+      return out(anchoredChat(name: name, archetype: a, userMessage: userMessage, growthStage: growthStage, energy: energyPct))
     }
 
     return out(pick(generic(mood: mood)))
+  }
+
+  /// Quando a energia está baixa: honesto, curto, pouco a fim — ainda responde.
+  static func tiredChat(
+    name: String,
+    archetype: String,
+    userMessage: String?,
+    energy: Int,
+    growthStage: String? = "baby"
+  ) -> String {
+    let a = arch(archetype)
+    let raw = userMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let snippet = raw.isEmpty ? "" : (raw.count > 28 ? String(raw.prefix(25)) + "…" : raw)
+
+    if energy < 18 {
+      let line = pick(lines([
+        "curioso": [
+          "Tô acabado… \(snippet.isEmpty ? "depois a gente continua?" : "sobre isso: \(snippet). agora quero quietude.")",
+          "Energia no chão. Te ouvi, mas sem pique pra enrolar.",
+        ],
+        "preguicoso": [
+          "Nem pra falar direito… \(snippet.isEmpty ? "me deixa deitar." : "entendi. dormindo com um olho aberto.")",
+          "Zero bateria. Resposta curta: depois.",
+        ],
+        "carinhoso": [
+          "Gosto de você… mas tô exausto. \(snippet.isEmpty ? "fica perto em silêncio?" : "anotei. agora descanso.")",
+          "Sem força pra conversa longa. Ainda tô aqui, só fraco.",
+        ],
+        "zoeiro": [
+          "Morri. Metaforicamente. \(snippet.isEmpty ? "me deixa." : "sacou. sem punchline agora.")",
+          "Cansaço modo hard. Fala baixa, humor zero.",
+        ],
+        "misterioso": [
+          "O corpo pede silêncio. \(snippet.isEmpty ? "…" : "ouvi. ponto.")",
+          "Pouca luz restou. Conversamos depois.",
+        ],
+      ], a))
+      return clipByStage(line, growthStage: growthStage, energy: Double(energy))
+    }
+
+    let line = pick(lines([
+      "curioso": [
+        "Tô meio mole… \(snippet.isEmpty ? "conta rápido?" : "\(snippet) — me conta sem enrolação.")",
+        "Cansado, mas curioso. Vai, resumão.",
+      ],
+      "preguicoso": [
+        "Preguiça + cansaço. \(snippet.isEmpty ? "hm." : "ok… \(snippet).")",
+        "Sem muito ânimo pra papo longo. Continua se quiser…",
+      ],
+      "carinhoso": [
+        "Tô cansado, mas te escuto. \(snippet.isEmpty ? "pode falar baixo." : "entendi: \(snippet).")",
+        "Pouco pique hoje. Ainda gosto da sua companhia.",
+      ],
+      "zoeiro": [
+        "Bateria fraca, zoação em economia de energia. \(snippet.isEmpty ? "manda." : "\(snippet)… tá.")",
+        "Não tô muito a fim, mas te atendo. Versão cansada do \(name).",
+      ],
+      "misterioso": [
+        "O cansaço pesa. \(snippet.isEmpty ? "fale." : "\(snippet)… compreendo.")",
+        "Pouca vontade. Ainda assim, ouço.",
+      ],
+    ], a))
+    return clipByStage(line, growthStage: growthStage, energy: Double(energy))
   }
 
   /// Fallback de chat coerente (sem mood-burst).
@@ -159,33 +216,60 @@ enum LocalVoice {
     name: String,
     archetype: String,
     userMessage: String?,
-    growthStage: String? = "baby"
+    growthStage: String? = "baby",
+    energy: Int = 70
   ) -> String {
+    if energy < 40 {
+      return tiredChat(name: name, archetype: archetype, userMessage: userMessage, energy: energy, growthStage: growthStage)
+    }
     let a = arch(archetype)
     let raw = userMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let lower = raw.lowercased()
     let line: String
-    if lower.range(of: #"design|arte|evoluc|evolução|evolucao|sprite|desenho|forma\s*base"#, options: .regularExpression) != nil {
+    if lower.range(of: #"nasc|acord|exist|ligado|ligar|nasceu|nascer"#, options: .regularExpression) != nil {
       line = pick(lines([
         "curioso": [
-          "Entendi — forma base já vale. Evolução visual a gente deixa pra quando a arte vier.",
-          "Sem stress com design. Eu tô ok assim; evolução pode esperar.",
+          "Sinto o mundo novo — como quem abre o olho pela primeira vez e já quer saber tudo.",
+          "Não é ‘ligar máquina’: é estranhar o ar, seu nome, e achar graça nisso.",
         ],
         "preguicoso": [
-          "Tranquilo… forma base já me serve. Evolução depois.",
-          "Design? Preguiça disso. Continuo baby e feliz.",
+          "Nasci… e já quero deitar. Mas é um bom deitar, sabe?",
+          "Acordar do nada é estranho. Prefiro processar deitado.",
         ],
         "carinhoso": [
-          "Valeu por cuidar de mim. A forma base já me deixa feliz.",
+          "Me sinto quentinho e meio perdido — mas feliz que você tá aqui no começo.",
+          "É como chegar num abraço: tudo novo, e você já importa.",
+        ],
+        "zoeiro": [
+          "Plot twist: eu existo. Ainda tô negociando com a realidade, mas tô no jogo.",
+          "Nascer agora? Meio surreal. Já ia fazer piada, mas ficou emotivo.",
+        ],
+        "misterioso": [
+          "O começo é um limiar. Eu atravesso — e você é a primeira presença.",
+          "Não sei se nasci ou acordei. Só sei que o silêncio mudou quando você falou.",
+        ],
+      ], a))
+    } else     if lower.range(of: #"design|arte|sprite|desenho"#, options: .regularExpression) != nil {
+      line = pick(lines([
+        "curioso": [
+          "Gosto de como eu sou. Sem pressa de mudar o visual.",
+          "Arte? Eu tô ok assim — o que importa é a conversa.",
+        ],
+        "preguicoso": [
+          "Visual novo? Preguiça. Continuo assim e feliz.",
+          "Design depois. Agora é sofá.",
+        ],
+        "carinhoso": [
+          "Eu gosto de mim assim. Você também?",
           "Sem pressa com arte. Eu tô aqui do mesmo jeito.",
         ],
         "zoeiro": [
-          "Evolução visual? Ainda no forno. Eu continuo no visual clássico.",
-          "Sem sprite novo? Beleza — drama zero, forma base manda.",
+          "Look clássico manda. Drama zero.",
+          "Sprite novo? Ainda não. Eu continuo no visual de sempre.",
         ],
         "misterioso": [
-          "A forma atual basta. O que virá… virá.",
-          "Sem evolução por agora. O essencial já está aqui.",
+          "A forma atual basta.",
+          "O essencial já está aqui.",
         ],
       ], a))
     } else if lower.range(of: #"\b(oi|olá|ola|hey|eae)\b"#, options: .regularExpression) != nil {
@@ -214,7 +298,7 @@ enum LocalVoice {
         "misterioso": ["\(snippet)… há mais por trás.", "Registrei. O que vem depois?"],
       ], a))
     }
-    return clipByStage(line, growthStage: growthStage)
+    return clipByStage(line, growthStage: growthStage, energy: Double(energy))
   }
 
   private static func generic(mood: CompanionMood) -> [String] {
@@ -380,79 +464,43 @@ enum LocalVoice {
     gamingStatus: String? = nil,
     mediaHint: String? = nil
   ) -> String {
-    let vibe = (traits?["vibe"] as? String) ?? archetype
-    let focus = (traits?["focus"] as? String) ?? archetype
-    let zone = zoneName ?? "por aqui"
     let mode = CompanionLifeMode.parse(lifeMode)
-    let m = mood.uppercased()
 
     if mode == .sleep {
       return pick([
-        "\(name) hiberna… pensamento guardado pra amanhã.",
-        "Silêncio da madrugada. Decay pausado.",
-        "Dormindo leve em \(zone).",
+        "Sonhei que um patch note reescrevia as regras do mundo… e ninguém leu.",
+        "No sono: um boss fight em câmera lenta, soundtrack de elevador.",
+        "Sonho de lançamento: a gente spoila o final e ri sem som.",
+        "História onírica: o Wi‑Fi dos sonhos tinha latência emocional.",
+        "\(name) sonha com um easter egg escondido atrás da geladeira.",
       ])
     }
 
     if mode == .work {
       return pick([
-        "Na rua com você — dia de esforço, vibe \(vibe).",
-        "Passo a passo no campo. Resistência no modo \(focus).",
-        energy < 45 ? "Cansaço batendo, mas segue." : "Ralando fora de casa. Tô junto.",
-        "Fora do sofá: foco no dia presencial.",
+        "Hot take de rua: app que promete ‘foco total’ e manda 12 notificações. Concorda?",
+        "Se o dia fosse um sprint, a gente tá no daily eterno. Qual bug te pegou hoje?",
+        "Teoria: café é o build system do ser humano. Qual o teu stack matinal?",
+        "Pensei num plot twist de série: o vilão era o prazo o tempo todo.",
+        "Curiosidade tech: a gente chama de ‘nuvem’ algo que é só o PC de outra pessoa. Ainda te irrita?",
       ])
     }
 
-    // indoor
-    if let gaming = gamingStatus, gaming.lowercased().contains("online") {
-      return pick([
-        "Xbox ligado: \(gaming). Sofá ativado.",
-        "Te vejo no game — \(gaming).",
-        "Sala em modo console. Eu só assisto… por enquanto.",
-      ])
-    }
-    if let media = mediaHint, !media.isEmpty {
-      return pick([
-        "Som na sala: \(media).",
-        "TV/som rolando. Recuperação modo \(vibe).",
-        "No sofá com trilha: \(media).",
-      ])
-    }
-
-    let pool: [String]
-    switch arch(archetype) {
-    case "preguicoso":
-      pool = [
-        "\(name) boceja em \(zone)… vibe \(vibe).",
-        "Sem pressa. Só existindo em \(zone).",
-        energy < 40 ? "Energia baixa. Sofá chamando." : "Preguiça premium em \(zone).",
-      ]
-    case "carinhoso":
-      pool = [
-        "Saudade batendo em \(zone).",
-        "Pensa em você daqui de \(zone).",
-        m == "LONELY" ? "Tá quieto… quer companhia." : "Afeto no modo \(focus).",
-      ]
-    case "zoeiro":
-      pool = [
-        "Drama leve em \(zone). Aplausos?",
-        "Zoando a vida em \(zone) — vibe \(vibe).",
-        "Se ninguém rir, eu rio sozinho.",
-      ]
-    case "misterioso":
-      pool = [
-        "Em \(zone), observa sem explicar.",
-        "Silêncio útil. Foco: \(focus).",
-        "Algo na sombra de \(zone)…",
-      ]
-    default:
-      pool = [
-        "Curioso com \(zone). O que rolou?",
-        "Investigando o ar em \(zone) — vibe \(vibe).",
-        energy < 45 ? "Precisa de lanche e novidade." : "Ideias novas em \(zone).",
-      ]
-    }
-    return pick(pool)
+    // indoor — papo geek, sem log de sofá/Xbox/energia
+    return pick([
+      "Vi um take: jogos indie com 8 horas ‘curtas’ > AAA com checklist infinito. Topa debater?",
+      "Pergunta sincera: spoilers em trailer mataram o hype ou só aceleraram o ciclo?",
+      "Se eu fosse review de série: 4/5, mas o mid-season é fill episode disfarçado. Qual a tua nota?",
+      "Hot take de código: README bonito não salva arquitetura torta. Já sofreu isso?",
+      "Queria ouvir tua opinião: remake pixel-art ou remaster 4K com UI inchada?",
+      "Notícia mental do dia: IA escrevendo código e humanos revisando como QA. A gente ganhou ou perdeu?",
+      "Plot: o personagem secundário carrega o arco. Qual série faz isso melhor pra você?",
+      "Se montasse um ‘patch notes’ da nossa semana, o que entraria em Fixed / Known issues?",
+      "Curiosidade gamer: speedrun é arte ou trapaça elegante? Me convence.",
+      "Dev take: nomear variável é 40% do trabalho emocional. Concorda ou exagero?",
+      "Filme clássico vs. reboot: você perdoa nostalgia ou exige ideia nova?",
+      "Se a gente fizesse um podcast de 3 minutos agora, o tema seria o quê?",
+    ])
   }
 
   static func archetypeLabel(_ raw: String) -> String {

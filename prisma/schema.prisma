@@ -102,6 +102,16 @@ model Companion {
   /// Pensamento guardado na hibernação para a 1ª abertura do dia.
   morningThought    String?
   morningThoughtDayKey String?
+  /// Título ativo de convivência (ex.: "Rei do Sofá").
+  activeTitle       String?
+  titleKey          String?
+  indoorMinutes     Int            @default(0)
+  workMinutes       Int            @default(0)
+  sleepMinutes      Int            @default(0)
+  /// Keys de badges já conquistadas (append-only).
+  unlockedTitles    String[]       @default([])
+  /// Título que o usuário escolheu exibir.
+  equippedTitleKey  String?
   contextJson       Json?
   lastContextAt     DateTime?
   pendingAlert      String?
@@ -110,10 +120,28 @@ model Companion {
   traits            Json?
   createdAt         DateTime       @default(now())
   interactions      Interaction[]
+  thoughts          CompanionThought[]
 
   @@index([userId])
   @@index([decayFrozen])
   @@index([lifeMode])
+}
+
+model CompanionThought {
+  id            String    @id
+  companionId   String
+  companion     Companion @relation(fields: [companionId], references: [id], onDelete: Cascade)
+  userId        String
+  text          String
+  kind          String    @default("mood")
+  zoneName      String?
+  lifeMode      String?
+  mediaHint     String?
+  gamingStatus  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([companionId, createdAt])
 }
 
 model Interaction {

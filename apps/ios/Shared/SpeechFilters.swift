@@ -56,9 +56,8 @@ enum SpeechFilters {
     return false
   }
 
-  /// Growth OFF: não inventar que já evoluiu.
-  static func isFalseEvolution(_ reply: String, growthEnabled: Bool = Growth.isEnabled) -> Bool {
-    if growthEnabled { return false }
+  /// Não inventar evolução (produto sem growth).
+  static func isFalseEvolution(_ reply: String, growthEnabled: Bool = false) -> Bool {
     let r = reply.lowercased()
     return r.range(
       of: #"j[aá]\s+evolu|voc[eê]\s+j[aá]\s+evolu|cresce\s+sozinho|eu\s+evolu[ií]|evolui,?\s*s[oó]|forma\s+nova|vire[i]?\s+teen|vire[i]?\s+adulto"#,
@@ -74,10 +73,58 @@ enum SpeechFilters {
     ) != nil
   }
 
-  static func acceptReply(_ reply: String, user: String, growthEnabled: Bool = Growth.isEnabled) -> Bool {
+  /// Log de ambiente (sofá/TV/Xbox/energia) — pensamentos não devem soar assim.
+  static func isStatusEnvironmentLog(_ text: String) -> Bool {
+    let t = text.lowercased()
+    if t.range(
+      of: #"t[oô]\s+no\s+sof[aá]|deitado\s+aqui\s+no\s+sof[aá]|sof[aá],\s*tv|tv\s+ligada|xbox\s+offline|xbox\s+ligado|energia\s+\d+%|energia\s+voltando|modo\s+sof[aá]|recarrega\s+no\s+sof[aá]|sof[aá]\s*\+\s*regener"#,
+      options: .regularExpression
+    ) != nil {
+      return true
+    }
+    var hits = 0
+    for needle in ["sofá", "sofa", "tv ligada", "xbox", "energia"] {
+      if t.contains(needle) { hits += 1 }
+    }
+    return hits >= 2
+  }
+
+  /// Eco de instrução de prompt / raciocínio do modelo.
+  static func isPromptLeak(_ text: String) -> Bool {
+    let t = text.lowercased()
+    return t.range(
+      of: #"fala curta|como pensamento|lifemode:|traits:|here'?s a thinking|thinking process|analyze user|system:|assistant:|gere uma|micro-hist[oó]ria"#,
+      options: .regularExpression
+    ) != nil
+  }
+
+  /// Frase cortada no meio (ex.: termina em "pens").
+  static func isTruncatedSpeech(_ text: String) -> Bool {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return true }
+    let last = trimmed.last!
+    let endsOk = ".!?…\"".contains(last) || last == "'" || last == "”" || last == "’"
+    if endsOk { return false }
+    let lastToken = trimmed.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).last.map(String.init) ?? ""
+    let letters = lastToken.filter(\.isLetter)
+    if (1...4).contains(letters.count) { return true }
+    let words = trimmed.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+    return words >= 8
+  }
+
+  static func acceptAutonomousThought(_ text: String) -> Bool {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !t.isEmpty, !isMoodBurst(t) else { return false }
+    if isPromptLeak(t) || isStatusEnvironmentLog(t) || isTruncatedSpeech(t) { return false }
+    if isFalseEvolution(t) { return false }
+    return true
+  }
+
+  static func acceptReply(_ reply: String, user: String, growthEnabled: Bool = false) -> Bool {
     guard !reply.isEmpty, !isMoodBurst(reply) else { return false }
+    if isPromptLeak(reply) || isTruncatedSpeech(reply) { return false }
     if isOffTopic(reply: reply, user: user) { return false }
-    if isFalseEvolution(reply, growthEnabled: growthEnabled) { return false }
+    if isFalseEvolution(reply) { return false }
     return true
   }
 }

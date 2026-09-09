@@ -40,10 +40,9 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
-		<string>processing</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Usamos localização para clima e, se você autorizar, para identificar a rede Wi‑Fi de casa (modos trabalho/sofá).</string>
+	<string>Precisamos da localização enquanto o app está aberto para identificar a rede Wi‑Fi de casa (modos sofá vs trabalho) e, se você perguntar, o clima da sua região.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

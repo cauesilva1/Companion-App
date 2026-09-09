@@ -39,7 +39,10 @@ struct StoredCompanion: Codable, Equatable, Sendable {
       lifeMode: LifeModeStore.loadMode().rawValue,
       gamingStatus: nil,
       mediaHint: nil,
-      morningThought: nil
+      morningThought: nil,
+      activeTitle: nil,
+      titleKey: nil,
+      equippedTitleKey: nil
     )
   }
 }

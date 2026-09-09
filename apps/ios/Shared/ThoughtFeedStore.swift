@@ -56,9 +56,37 @@ enum ThoughtFeedStore {
     UserDefaults.standard.set(data, forKey: key)
   }
 
+  /// Substitui pelo feed da cloud **sem apagar** pensamentos locais recentes (widget/app).
+  static func replaceAll(_ items: [ThoughtFeedEntry]) -> [ThoughtFeedEntry] {
+    // Cloud vazia não deve limpar o que o widget/app acabou de mostrar.
+    if items.isEmpty {
+      return load()
+    }
+    let local = load()
+    let cloudIds = Set(items.map(\.id))
+    let cloudTexts = Set(items.map(\.text))
+    let keepLocal = local.filter { entry in
+      if cloudIds.contains(entry.id) { return false }
+      if cloudTexts.contains(entry.text) { return false }
+      // Mantém locais das últimas 24h (openFromWidget / autonomous ainda não na cloud)
+      return Date().timeIntervalSince(entry.createdAt) < 24 * 3600
+    }
+    let merged = (items + keepLocal).sorted { $0.createdAt < $1.createdAt }
+    let trimmed = Array(merged.suffix(maxEntries))
+    save(trimmed)
+    return trimmed
+  }
+
   @discardableResult
   static func append(_ entry: ThoughtFeedEntry) -> [ThoughtFeedEntry] {
     var items = load()
+    if items.contains(where: { $0.id == entry.id }) { return items }
+    // Anti-spam: mesmo texto nos últimos 2 minutos
+    if let last = items.last,
+       last.text == entry.text,
+       abs(last.createdAt.timeIntervalSince(entry.createdAt)) < 120 {
+      return items
+    }
     items.append(entry)
     save(items)
     return items
@@ -72,4 +100,35 @@ enum ThoughtFeedStore {
     CompanionAppGroup.defaults.removeObject(forKey: key)
     UserDefaults.standard.removeObject(forKey: key)
   }
+
+  static func fromCloud(_ row: CloudThoughtDTO) -> ThoughtFeedEntry {
+    let created: Date = {
+      if let raw = row.createdAt {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: raw) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        return iso.date(from: raw) ?? Date()
+      }
+      return Date()
+    }()
+    return ThoughtFeedEntry(
+      id: row.id,
+      text: row.text,
+      createdAt: created,
+      kind: row.kind ?? "mood",
+      zoneName: row.zoneName
+    )
+  }
+}
+
+struct CloudThoughtDTO: Codable, Sendable {
+  var id: String
+  var text: String
+  var kind: String?
+  var zoneName: String?
+  var createdAt: String?
+  var lifeMode: String?
+  var mediaHint: String?
+  var gamingStatus: String?
 }

@@ -35,6 +35,7 @@
 		81AFDC6A72EFF6BC2570C47A /* CompanionTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF1AA863BFDD72F7E64F159 /* CompanionTheme.swift */; };
 		8FBBA554F5AF69AE3521763A /* MoodEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF2530B7B22253C46077B2B /* MoodEngine.swift */; };
 		9388960B5FD45BC26F03BA41 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4796735B50B3A08E802EAA /* SettingsView.swift */; };
+		PRF1LE0000000000000002 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRF1LE0000000000000001 /* ProfileView.swift */; };
 		9406CC9914B4F1A767A9AC0C /* WidgetBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = F206030817C7B46CE37E9337 /* WidgetBackground.swift */; };
 		9ED83EAFBE60409927030C76 /* CompanionWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BEDCE0A9F04EC93E2FFC830 /* CompanionWidgetBundle.swift */; };
 		A111233935635EA10DAE8F99 /* CompanionLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A54C64078542203A2C2B0E0 /* CompanionLocalStore.swift */; };
@@ -47,7 +48,10 @@
 		H0U5EZ0NE0000000000003 /* HouseZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = H0U5EZ0NE0000000000001 /* HouseZone.swift */; };
 		L1FEM0DE00000000000002 /* LifeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = L1FEM0DE00000000000001 /* LifeMode.swift */; };
 		L1FEM0DE00000000000003 /* LifeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = L1FEM0DE00000000000001 /* LifeMode.swift */; };
+		EM0TE00000000000000002 /* CompanionContextEmote.swift in Sources */ = {isa = PBXBuildFile; fileRef = EM0TE00000000000000001 /* CompanionContextEmote.swift */; };
+		EM0TE00000000000000003 /* CompanionContextEmote.swift in Sources */ = {isa = PBXBuildFile; fileRef = EM0TE00000000000000001 /* CompanionContextEmote.swift */; };
 		C0NTEXT000000000000002 /* ContextTelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0NTEXT000000000000001 /* ContextTelemetryService.swift */; };
+		BGTELEMETRY00000000002 /* BackgroundTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = BGTELEMETRY00000000001 /* BackgroundTelemetry.swift */; };
 		TH0UGHTFEED0000000002 /* ThoughtFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */; };
 		TH0UGHTFEED0000000003 /* ThoughtFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */; };
 		BC2C2FA023DC31E2496CC7F6 /* CompanionLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A54C64078542203A2C2B0E0 /* CompanionLocalStore.swift */; };
@@ -129,7 +133,9 @@
 		6CB17288E6DF34E3A51BCBB1 /* CompanionSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSnapshot.swift; sourceTree = "<group>"; };
 		H0U5EZ0NE0000000000001 /* HouseZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HouseZone.swift; sourceTree = "<group>"; };
 		L1FEM0DE00000000000001 /* LifeMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeMode.swift; sourceTree = "<group>"; };
+		EM0TE00000000000000001 /* CompanionContextEmote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionContextEmote.swift; sourceTree = "<group>"; };
 		C0NTEXT000000000000001 /* ContextTelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextTelemetryService.swift; sourceTree = "<group>"; };
+		BGTELEMETRY00000000001 /* BackgroundTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTelemetry.swift; sourceTree = "<group>"; };
 		TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThoughtFeedStore.swift; sourceTree = "<group>"; };
 		6CB1C4FE9D5412582C14DE23 /* SkyTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkyTheme.swift; sourceTree = "<group>"; };
 		6F2D5F5264E21FE47AA20927 /* CompanionLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionLiveActivity.swift; sourceTree = "<group>"; };
@@ -146,6 +152,7 @@
 		CFF1AA863BFDD72F7E64F159 /* CompanionTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionTheme.swift; sourceTree = "<group>"; };
 		DAE786A3DB79F438BEB1EC15 /* IslandRunThenHurtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandRunThenHurtView.swift; sourceTree = "<group>"; };
 		DE4796735B50B3A08E802EAA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		PRF1LE0000000000000001 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		EAAC0408B3D8291A536944E7 /* LiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityController.swift; sourceTree = "<group>"; };
 		EAF2530B7B22253C46077B2B /* MoodEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoodEngine.swift; sourceTree = "<group>"; };
 		ECF112D33203CC540B067DCF /* DinoSpriteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DinoSpriteView.swift; sourceTree = "<group>"; };
@@ -188,6 +195,7 @@
 				F7A8293B4C5D6E70F0 /* CompanionNotifier.swift */,
 				A1B2C3D4E5F60000000001 /* HealthKitStepsService.swift */,
 				C0NTEXT000000000000001 /* ContextTelemetryService.swift */,
+				BGTELEMETRY00000000001 /* BackgroundTelemetry.swift */,
 				1922CA835BC342A2CFDA5E8C /* LLMService.swift */,
 				D4E5F60718293A4B34 /* NowPlayingService.swift */,
 				E6F718293A4B5C60D0 /* SpotifyService.swift */,
@@ -235,6 +243,7 @@
 				E5F60718293A4B41C0 /* ChatView.swift */,
 				B2C3D4E5F60718293A4B14 /* QuizView.swift */,
 				DE4796735B50B3A08E802EAA /* SettingsView.swift */,
+				PRF1LE0000000000000001 /* ProfileView.swift */,
 			);
 			path = Companion;
 			sourceTree = "<group>";
@@ -287,6 +296,7 @@
 				B2C3D4E5F60718293A4B11 /* CompanionQuiz.swift */,
 				H0U5EZ0NE0000000000001 /* HouseZone.swift */,
 				L1FEM0DE00000000000001 /* LifeMode.swift */,
+				EM0TE00000000000000001 /* CompanionContextEmote.swift */,
 				TH0UGHTFEED0000000001 /* ThoughtFeedStore.swift */,
 				G1R0WTH5W1FT0000000001 /* Growth.swift */,
 				CFF1AA863BFDD72F7E64F159 /* CompanionTheme.swift */,
@@ -444,6 +454,7 @@
 				BABD89CBE907D570CD63B75B /* CompanionSnapshot.swift in Sources */,
 				H0U5EZ0NE0000000000002 /* HouseZone.swift in Sources */,
 				L1FEM0DE00000000000002 /* LifeMode.swift in Sources */,
+				EM0TE00000000000000002 /* CompanionContextEmote.swift in Sources */,
 				TH0UGHTFEED0000000002 /* ThoughtFeedStore.swift in Sources */,
 				81AFDC6A72EFF6BC2570C47A /* CompanionTheme.swift in Sources */,
 				D5F8003691C60099394679FC /* ContentView.swift in Sources */,
@@ -460,6 +471,7 @@
 				F7A8293B4C5D6E70F1 /* CompanionNotifier.swift in Sources */,
 				A1B2C3D4E5F60000000002 /* HealthKitStepsService.swift in Sources */,
 				C0NTEXT000000000000002 /* ContextTelemetryService.swift in Sources */,
+				BGTELEMETRY00000000002 /* BackgroundTelemetry.swift in Sources */,
 				C3D4E5F60718293A4B21 /* LoginView.swift in Sources */,
 				E5F60718293A4B41C1 /* ChatView.swift in Sources */,
 				C3D4E5F60718293A4B27 /* MissionCatalog.swift in Sources */,
@@ -472,6 +484,7 @@
 				D4E5F60718293A4B33 /* SyncQueue.swift in Sources */,
 				F8E1A201FreshInst01 /* FreshInstall.swift in Sources */,
 				9388960B5FD45BC26F03BA41 /* SettingsView.swift in Sources */,
+				PRF1LE0000000000000002 /* ProfileView.swift in Sources */,
 				B2C3D4E5F60718293A4B15 /* QuizView.swift in Sources */,
 				B2C3D4E5F60718293A4B12 /* CompanionQuiz.swift in Sources */,
 				G1R0WTH5W1FT0000000003 /* Growth.swift in Sources */,
@@ -495,6 +508,7 @@
 				A5EF0E710C501AEF59916F76 /* CompanionSnapshot.swift in Sources */,
 				H0U5EZ0NE0000000000003 /* HouseZone.swift in Sources */,
 				L1FEM0DE00000000000003 /* LifeMode.swift in Sources */,
+				EM0TE00000000000000003 /* CompanionContextEmote.swift in Sources */,
 				TH0UGHTFEED0000000003 /* ThoughtFeedStore.swift in Sources */,
 				2389CDD29831C207F5ADFC45 /* CompanionTheme.swift in Sources */,
 				9ED83EAFBE60409927030C76 /* CompanionWidgetBundle.swift in Sources */,

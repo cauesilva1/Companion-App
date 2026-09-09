@@ -1,5 +1,6 @@
 -- Full wipe for clean slate (dev reset).
 TRUNCATE TABLE
+  "CompanionThought",
   "Interaction",
   "Companion",
   "UserMissionProgress",

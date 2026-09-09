@@ -24,7 +24,7 @@ fi
 cd "$ROOT"
 "$SB" link --project-ref "$REF" || true
 
-for fn in companion-state tick-decay steps-ingest context-ingest; do
+for fn in companion-state tick-decay steps-ingest context-ingest thoughts; do
   echo "=== deploy $fn ==="
   "$SB" functions deploy "$fn" --project-ref "$REF" --use-api
 done

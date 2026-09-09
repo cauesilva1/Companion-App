@@ -9,7 +9,7 @@ struct CompanionEntry: TimelineEntry {
 }
 
 enum CompanionWidgetTimeline {
-  static let frameInterval: TimeInterval = 0.15
+  static let frameInterval: TimeInterval = 0.2
   static let cycleSeconds: TimeInterval = 4.0
 
   static func entries(now: Date = Date(), snapshot: CompanionSnapshot) -> [CompanionEntry] {
@@ -19,7 +19,7 @@ enum CompanionWidgetTimeline {
     #else
     let frameCount = 3
     #endif
-    let line = latestLine(for: snapshot)
+    let line = shortBlurb(for: snapshot, maxChars: 180)
     let steps = Int(cycleSeconds / frameInterval)
     return (0..<steps).map { i in
       CompanionEntry(
@@ -31,51 +31,132 @@ enum CompanionWidgetTimeline {
     }
   }
 
+  static func staticEntry(
+    now: Date = Date(),
+    snapshot: CompanionSnapshot,
+    maxChars: Int = 180
+  ) -> CompanionEntry {
+    CompanionEntry(
+      date: now,
+      snapshot: snapshot,
+      frameIndex: 0,
+      lastLine: shortBlurb(for: snapshot, maxChars: maxChars)
+    )
+  }
+
+  static func shortBlurb(for snapshot: CompanionSnapshot, maxChars: Int) -> String {
+    let full = latestLine(for: snapshot)
+    // Grava o texto COMPLETO — truncar só na UI do widget (senão a conversa herda o "…").
+    if !WidgetSpeechStore.isGenericStatusLine(full) {
+      WidgetSpeechStore.saveDisplayLine(full)
+    }
+    // Soft-cap alto: o lineLimit do SwiftUI usa a altura do widget de verdade.
+    return truncate(full, maxChars: max(maxChars, 180))
+  }
+
   static func latestLine(for snapshot: CompanionSnapshot) -> String {
-    if let morning = snapshot.morningThought?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !morning.isEmpty {
-      return morning
+    let candidates: [String?] = [
+      snapshot.morningThought,
+      LifeModeStore.pendingMorningThought,
+      ThoughtFeedStore.latestLine(),
+      WidgetSpeechStore.load()?.idleLine,
+      WidgetSpeechStore.displayLine(),
+      snapshot.moodText,
+    ]
+    var firstGeneric: String?
+    var firstTruncated: String?
+    for raw in candidates {
+      let t = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      guard !t.isEmpty else { continue }
+      if t == "Oi! Vamos brincar?" { continue }
+      if t.localizedCaseInsensitiveContains("crescer") { continue }
+      if t.localizedCaseInsensitiveContains("evoluir") { continue }
+      if WidgetSpeechStore.isGenericStatusLine(t) {
+        if firstGeneric == nil { firstGeneric = t }
+        continue
+      }
+      // Prefere frase completa; "…" é só visual do widget antigo pinado.
+      if t.hasSuffix("…") || t.hasSuffix("...") {
+        if let full = WidgetSpeechStore.expandTruncated(t) {
+          return full
+        }
+        if firstTruncated == nil { firstTruncated = t }
+        continue
+      }
+      return t
     }
-    if let pending = LifeModeStore.pendingMorningThought?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !pending.isEmpty {
-      return pending
+    if let pinned = WidgetSpeechStore.displayLine() {
+      return WidgetSpeechStore.expandTruncated(pinned) ?? pinned
     }
-    if let thought = ThoughtFeedStore.latestLine(), !thought.isEmpty {
-      return thought
+    return firstTruncated ?? firstGeneric ?? "\(snapshot.name) por aqui"
+  }
+
+  static func truncate(_ text: String, maxChars: Int) -> String {
+    let t = text
+      .replacingOccurrences(of: "\n", with: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard t.count > maxChars else { return t }
+    let end = t.index(t.startIndex, offsetBy: maxChars)
+    var slice = String(t[..<end])
+    if let sp = slice.lastIndex(of: " "), sp > slice.startIndex {
+      slice = String(slice[..<sp])
     }
-    if let speech = WidgetSpeechStore.load(),
-       let idle = speech.idleLine?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !idle.isEmpty {
-      return idle
-    }
-    let t = snapshot.moodText.trimmingCharacters(in: .whitespacesAndNewlines)
-    return t.isEmpty ? "\(snapshot.name) por aqui" : t
+    return slice.trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+  }
+
+  static func resolvedSnapshot() -> CompanionSnapshot {
+    CompanionSnapshotStore.load() ?? .demo
+  }
+
+  static var previewSnapshot: CompanionSnapshot {
+    CompanionSnapshot(
+      id: "preview",
+      name: "Jaozinho",
+      mood: "HAPPY",
+      moodText: "De boa no sofá.",
+      energy: 64,
+      affection: 82,
+      skin: "dino-mono",
+      archetype: "zoeiro",
+      updatedAt: Date(),
+      growthStage: "baby",
+      createdAt: Date(),
+      presenceStatus: "present",
+      decayFrozen: false,
+      lifeMode: "indoor",
+      gamingStatus: nil,
+      mediaHint: nil,
+      morningThought: nil,
+      activeTitle: nil,
+      titleKey: nil,
+      equippedTitleKey: nil
+    )
   }
 }
 
 struct CompanionProvider: TimelineProvider {
   func placeholder(in context: Context) -> CompanionEntry {
-    CompanionEntry(date: Date(), snapshot: .demo, frameIndex: 0, lastLine: "Oi!")
+    CompanionWidgetTimeline.staticEntry(snapshot: CompanionWidgetTimeline.previewSnapshot, maxChars: 56)
   }
 
   func getSnapshot(in context: Context, completion: @escaping (CompanionEntry) -> Void) {
-    let snap = CompanionSnapshotStore.load() ?? .demo
+    if context.isPreview {
+      completion(placeholder(in: context))
+      return
+    }
     completion(
-      CompanionEntry(
-        date: Date(),
-        snapshot: snap,
-        frameIndex: 0,
-        lastLine: CompanionWidgetTimeline.latestLine(for: snap)
+      CompanionWidgetTimeline.staticEntry(
+        snapshot: CompanionWidgetTimeline.resolvedSnapshot(),
+        maxChars: 180
       )
     )
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<CompanionEntry>) -> Void) {
-    let snap = CompanionSnapshotStore.load() ?? .demo
+    let snap = CompanionWidgetTimeline.resolvedSnapshot()
     let now = Date()
     let entries = CompanionWidgetTimeline.entries(now: now, snapshot: snap)
-    let refresh = now.addingTimeInterval(CompanionWidgetTimeline.cycleSeconds)
-    completion(Timeline(entries: entries, policy: .after(refresh)))
+    completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(CompanionWidgetTimeline.cycleSeconds))))
   }
 }
 
@@ -85,11 +166,12 @@ struct CompanionHomeWidget: Widget {
   var body: some WidgetConfiguration {
     StaticConfiguration(kind: kind, provider: CompanionProvider()) { entry in
       CompanionHomeView(entry: entry)
+        .companionExpandIntoMargins()
         .companionMockupWidgetBackground()
-        .widgetURL(URL(string: "companion://feed"))
+        .widgetURL(URL(string: "companion://feed?source=widget"))
     }
     .configurationDisplayName("Companion")
-    .description("Avatar, energia e o pensamento do dia.")
+    .description("Seu companion e o pensamento do momento.")
     .supportedFamilies([.systemSmall, .systemMedium])
   }
 }
@@ -100,92 +182,114 @@ struct CompanionHomeView: View {
 
   private var lightChrome: Bool { SkyPeriod.current().prefersLightChrome }
   private var titleColor: Color { lightChrome ? Color.white : Color(red: 0.12, green: 0.18, blue: 0.32) }
-  private var bodyColor: Color { lightChrome ? Color.white.opacity(0.9) : Color(red: 0.22, green: 0.28, blue: 0.42) }
-  private var panelFill: Color {
-    lightChrome ? Color.black.opacity(0.38) : Color.white.opacity(0.72)
+  private var quoteColor: Color { lightChrome ? Color.white.opacity(0.95) : Color(red: 0.16, green: 0.22, blue: 0.36) }
+  private var mutedColor: Color { lightChrome ? Color.white.opacity(0.7) : Color(red: 0.34, green: 0.4, blue: 0.52) }
+  private var trackFill: Color {
+    lightChrome ? Color.white.opacity(0.22) : Color.black.opacity(0.1)
+  }
+  private var panel: Color {
+    lightChrome ? Color.black.opacity(0.2) : Color.white.opacity(0.42)
   }
 
   var body: some View {
     Group {
-      if family == .systemSmall {
-        small
-      } else {
-        medium
-      }
+      if family == .systemSmall { small } else { medium }
     }
   }
 
   private var small: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 8) {
-        WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 40)
-        Text(entry.snapshot.name)
-          .font(.subheadline.weight(.bold))
-          .foregroundStyle(titleColor)
-          .lineLimit(1)
+      HStack(alignment: .center, spacing: 8) {
+        WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 44)
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text(entry.snapshot.name)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(titleColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+
+          HStack(spacing: 8) {
+            HStack(spacing: 2) {
+              Image(systemName: "bolt.fill")
+                .foregroundStyle(Color.yellow.opacity(0.95))
+              Text("\(entry.snapshot.energyPercent)")
+                .foregroundStyle(titleColor)
+            }
+            HStack(spacing: 2) {
+              Image(systemName: "heart.fill")
+                .foregroundStyle(Color.pink.opacity(0.9))
+              Text("\(entry.snapshot.affectionPercent)")
+                .foregroundStyle(titleColor)
+            }
+          }
+          .font(.caption2.monospacedDigit().weight(.bold))
+        }
         Spacer(minLength: 0)
       }
-      miniBar(value: entry.snapshot.energyPercent, color: Color.yellow.opacity(0.95))
-      miniBar(value: entry.snapshot.affectionPercent, color: Color.pink.opacity(0.9))
+
       Text(entry.lastLine)
-        .font(.caption2.weight(.medium))
-        .foregroundStyle(bodyColor)
-        .lineLimit(2)
-        .minimumScaleFactor(0.8)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(quoteColor)
+        .lineLimit(7)
+        .minimumScaleFactor(0.78)
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .layoutPriority(1)
     }
     .padding(10)
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    .background(
-      RoundedRectangle(cornerRadius: 14, style: .continuous)
-        .fill(panelFill)
-    )
-    .padding(4)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
+  /// Medium: dino em destaque + fala como citação (sem barras grossas poluídas).
   private var medium: some View {
-    HStack(spacing: 12) {
-      WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 72)
-      VStack(alignment: .leading, spacing: 6) {
+    HStack(alignment: .center, spacing: 14) {
+      WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 96)
+
+      VStack(alignment: .leading, spacing: 8) {
         Text(entry.snapshot.name)
           .font(.title3.bold())
           .foregroundStyle(titleColor)
-        labeledBar(title: "Energia", value: entry.snapshot.energyPercent, color: Color.yellow.opacity(0.95))
-        labeledBar(title: "Afeto", value: entry.snapshot.affectionPercent, color: Color.pink.opacity(0.9))
+          .lineLimit(1)
+
+        HStack(spacing: 10) {
+          statChip(
+            icon: "bolt.fill",
+            value: entry.snapshot.energyPercent,
+            color: Color.yellow.opacity(0.95)
+          )
+          statChip(
+            icon: "heart.fill",
+            value: entry.snapshot.affectionPercent,
+            color: Color.pink.opacity(0.9)
+          )
+        }
+
         Text(entry.lastLine)
           .font(.subheadline.weight(.medium))
-          .foregroundStyle(bodyColor)
-          .lineLimit(2)
+          .foregroundStyle(quoteColor)
+          .lineLimit(3)
+          .minimumScaleFactor(0.85)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       }
-      Spacer(minLength: 0)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
-    .padding(12)
+    .padding(14)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    .background(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .fill(panelFill)
-    )
-    .padding(4)
   }
 
-  private func miniBar(value: Int, color: Color) -> some View {
-    GeometryReader { geo in
-      ZStack(alignment: .leading) {
-        Capsule().fill(Color.white.opacity(lightChrome ? 0.2 : 0.25))
-        Capsule()
-          .fill(color)
-          .frame(width: geo.size.width * CGFloat(max(0, min(100, value))) / 100)
-      }
+  private func statChip(icon: String, value: Int, color: Color) -> some View {
+    HStack(spacing: 4) {
+      Image(systemName: icon)
+        .font(.caption2.weight(.bold))
+        .foregroundStyle(color)
+      Text("\(value)%")
+        .font(.caption.monospacedDigit().weight(.bold))
+        .foregroundStyle(titleColor)
     }
-    .frame(height: 5)
-  }
-
-  private func labeledBar(title: String, value: Int, color: Color) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text("\(title) \(value)%")
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(bodyColor)
-      miniBar(value: value, color: color)
-    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 4)
+    .background(Capsule().fill(panel))
   }
 }
 
@@ -204,10 +308,10 @@ struct WidgetDinoFrame: View {
         .scaledToFit()
         .frame(width: size, height: size)
     } else {
-      DinoStaticFrame(skin: skin, size: size)
+      DinoAvatar(skin: skin, size: size)
     }
     #else
-    DinoStaticFrame(skin: skin, size: size)
+    DinoAvatar(skin: skin, size: size)
     #endif
   }
 }

@@ -26,6 +26,23 @@ struct WidgetSpeechPayload: Codable, Equatable {
 
 enum WidgetSpeechStore {
   private static let key = "companion.widgetSpeech.v1"
+  private static let displayLineKey = "companion.widgetDisplayLine.v1"
+
+  /// Status genérico do MoodEngine — não deve substituir a fala do widget.
+  static func isGenericStatusLine(_ text: String) -> Bool {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if t.isEmpty { return true }
+    if t == "Oi! Vamos brincar?" { return true }
+    let lower = t.lowercased()
+    if lower.hasSuffix(" por aqui") { return true }
+    if lower.range(
+      of: #"está (feliz|tranquilo|empolgado|entediado|com sono|triste|sentindo sua falta)$"#,
+      options: .regularExpression
+    ) != nil {
+      return true
+    }
+    return false
+  }
 
   static func save(_ payload: WidgetSpeechPayload) {
     guard let data = try? JSONEncoder().encode(payload) else { return }
@@ -56,11 +73,17 @@ enum WidgetSpeechStore {
         updatedAt: Date()
       )
     )
+    if !isGenericStatusLine(comment) {
+      saveDisplayLine(comment)
+    }
   }
 
   static func saveIdle(line: String, name: String) {
+    // Não deixa status genérico apagar a fala boa do widget.
+    if isGenericStatusLine(line) { return }
+    if line.hasSuffix("…") || line.hasSuffix("...") { return }
+
     var current = load()
-    // Não apaga música recente
     if let cur = current, cur.hasFreshMusic {
       current = WidgetSpeechPayload(
         name: name,
@@ -71,6 +94,7 @@ enum WidgetSpeechStore {
         updatedAt: cur.updatedAt
       )
       if let current { save(current) }
+      saveDisplayLine(line)
       return
     }
     save(
@@ -83,9 +107,66 @@ enum WidgetSpeechStore {
         updatedAt: Date()
       )
     )
+    saveDisplayLine(line)
   }
 
-  /// Remove faixa/comentário; preserva idleLine se existir.
+  /// Linha fixa do widget — sobrevive a sync/cloud que limpa o thought feed.
+  static func saveDisplayLine(_ line: String) {
+    let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !t.isEmpty, !isGenericStatusLine(t) else { return }
+    // Nunca piná texto já cortado com reticências.
+    if t.hasSuffix("…") || t.hasSuffix("...") { return }
+    CompanionAppGroup.defaults.set(t, forKey: displayLineKey)
+    UserDefaults.standard.set(t, forKey: displayLineKey)
+  }
+
+  static func displayLine() -> String? {
+    let raw: String? = {
+      if let s = CompanionAppGroup.defaults.string(forKey: displayLineKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
+         !s.isEmpty {
+        return s
+      }
+      if let s = UserDefaults.standard.string(forKey: displayLineKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
+         !s.isEmpty {
+        return s
+      }
+      if let idle = load()?.idleLine?.trimmingCharacters(in: .whitespacesAndNewlines),
+         !idle.isEmpty {
+        return idle
+      }
+      return nil
+    }()
+    guard let raw, !isGenericStatusLine(raw) else { return nil }
+    if let full = expandTruncated(raw) {
+      saveDisplayLine(full)
+      return full
+    }
+    if raw.hasSuffix("…") || raw.hasSuffix("...") { return nil }
+    return raw
+  }
+
+  /// Se o pin antigo veio truncado ("…"), tenta achar a frase completa no feed/idle.
+  static func expandTruncated(_ text: String) -> String? {
+    var stem = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if stem.hasSuffix("…") { stem = String(stem.dropLast()) }
+    if stem.hasSuffix("...") { stem = String(stem.dropLast(3)) }
+    stem = stem.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard stem.count >= 12 else { return nil }
+
+    if let hit = ThoughtFeedStore.load().reversed().first(where: {
+      $0.text.hasPrefix(stem) && $0.text.count > stem.count
+    }) {
+      return hit.text
+    }
+    if let idle = load()?.idleLine?.trimmingCharacters(in: .whitespacesAndNewlines),
+       idle.hasPrefix(stem),
+       idle.count > stem.count,
+       !idle.hasSuffix("…") {
+      return idle
+    }
+    return nil
+  }
+
   static func clearMusic() {
     guard let cur = load() else { return }
     save(

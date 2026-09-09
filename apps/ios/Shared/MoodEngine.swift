@@ -50,8 +50,8 @@ enum MoodEngine {
     case .POKE: fx = (2, -1)
     case .FEED: fx = (0, 8)
     case .PLAY: fx = (6, -4)
-    case .CHAT: fx = (4, -2)
-    case .TEASE: fx = (5, -2)
+    case .CHAT: fx = (4, -1) // cansa um pouco; tom cansado no LLM/LocalVoice
+    case .TEASE: fx = (5, -1)
     case .IGNORE_CHECK: fx = (-4, -2)
     }
     let nextAffection = clamp(affection + fx.affection)

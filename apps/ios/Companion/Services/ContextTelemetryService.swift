@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import CoreLocation
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -15,6 +16,7 @@ final class ContextTelemetryService: ObservableObject {
   @Published private(set) var lastLifeMode: CompanionLifeMode = LifeModeStore.loadMode()
   @Published private(set) var lastSsid: String?
   @Published private(set) var onWifi = false
+  @Published private(set) var locationAuthorized = false
 
   private let monitor = NWPathMonitor()
   private var started = false
@@ -25,6 +27,7 @@ final class ContextTelemetryService: ObservableObject {
     #if canImport(UIKit)
     UIDevice.current.isBatteryMonitoringEnabled = true
     #endif
+    locationAuthorized = LocationHelper.shared.isWhenInUseAuthorized
     monitor.pathUpdateHandler = { [weak self] path in
       Task { @MainActor in
         self?.onWifi = path.usesInterfaceType(.wifi)
@@ -33,16 +36,46 @@ final class ContextTelemetryService: ObservableObject {
     monitor.start(queue: DispatchQueue(label: "companion.context.path"))
   }
 
-  func ingestNow() async {
+  /// Pede When In Use antes de ler SSID (Settings / ingest).
+  @discardableResult
+  func ensureLocationForWifiSsid() async -> Bool {
     start()
+    let status = await LocationHelper.shared.ensureWhenInUseAuthorized()
+    let ok: Bool
+    switch status {
+    case .authorizedWhenInUse, .authorizedAlways:
+      ok = true
+    default:
+      ok = false
+    }
+    locationAuthorized = ok
+    return ok
+  }
+
+  func ingestNow(appForeground: Bool? = nil) async {
+    start()
+    _ = await ensureLocationForWifiSsid()
+
+    let foreground: Bool = {
+      if let appForeground { return appForeground }
+      #if canImport(UIKit)
+      return UIApplication.shared.applicationState == .active
+      #else
+      return true
+      #endif
+    }()
+
     let ssid = await currentSsid()
     lastSsid = ssid
     let home = LifeModeStore.homeWifiSsid
+
+    // true = em casa, false = fora com certeza, nil = desconhecido (não forçar work)
     let onHome: Bool? = {
       if let home, let ssid {
         return home.caseInsensitiveCompare(ssid) == .orderedSame
       }
       if !onWifi { return false }
+      // Wi‑Fi ligado mas SSID ilegível → unknown (evita falso work)
       return nil
     }()
 
@@ -53,15 +86,14 @@ final class ContextTelemetryService: ObservableObject {
     let mediaLine = NowPlayingService.shared.line
     let mediaActive = mediaLine != nil && !(mediaLine?.isEmpty ?? true)
 
-    HouseZoneStore.resolveActiveZone(ssid: ssid)
+    _ = HouseZoneStore.resolveActiveZone(ssid: ssid)
 
     guard SupabaseConfig.isConfigured, KeychainStore.get(.supabaseAccess) != nil else {
-      // Offline heuristic for UI
       let mode = localHeuristic(
-        onHome: onHome ?? false,
+        onHome: onHome,
         hour: hour,
-        stepsRecent: stepsRecent,
-        charging: charging
+        alreadySleep: lastLifeMode == .sleep,
+        appForeground: foreground
       )
       lastLifeMode = mode
       LifeModeStore.saveMode(mode)
@@ -79,36 +111,66 @@ final class ContextTelemetryService: ObservableObject {
         mediaActive: mediaActive,
         mediaHint: mediaLine,
         homeWifiSsid: home,
-        xboxGamertag: LifeModeStore.xboxGamertag
+        xboxGamertag: LifeModeStore.xboxGamertag,
+        appForeground: foreground
       )
       let mode = CompanionLifeMode.parse(result.lifeMode)
       lastLifeMode = mode
       LifeModeStore.saveMode(mode)
+      HouseZoneStore.syncWithLifeMode(mode)
       if let morning = result.morningThought, !morning.isEmpty {
         LifeModeStore.pendingMorningThought = morning
+      }
+      // Snapshot espelho local de mídia/Xbox para LLM/feed
+      if var snap = CompanionSnapshotStore.load() {
+        if let media = result.mediaHint { snap.mediaHint = media }
+        else if mediaActive { snap.mediaHint = mediaLine }
+        else if !mediaActive { snap.mediaHint = nil }
+        if let gaming = result.gamingStatus { snap.gamingStatus = gaming }
+        if let lm = result.lifeMode { snap.lifeMode = lm }
+        if let title = result.activeTitle { snap.activeTitle = title }
+        CompanionSnapshotStore.save(snap)
+      }
+      if result.thoughts != nil {
+        // ThoughtFeedStore já atualizado em ingestContext
       }
     } catch {
       print("[context] ingest: \(error.localizedDescription)")
     }
   }
 
-  /// Captura SSID atual (requer entitlement Wi‑Fi Info + Location quando o SO exigir).
+  /// Captura SSID atual após garantir Location When In Use.
   func captureCurrentSsidAsHome() async -> String? {
+    let authorized = await ensureLocationForWifiSsid()
+    guard authorized else { return nil }
     let ssid = await currentSsid()
     guard let ssid, !ssid.isEmpty else { return nil }
     LifeModeStore.homeWifiSsid = ssid
-    await ingestNow()
+    await ingestNow(appForeground: true)
     return ssid
   }
 
-  private func localHeuristic(onHome: Bool, hour: Int, stepsRecent: Int, charging: Bool) -> CompanionLifeMode {
-    if hour >= 0 && hour < 6 && stepsRecent < 80 && (charging || stepsRecent < 20) {
-      return .sleep
+  private func localHeuristic(
+    onHome: Bool?,
+    hour: Int,
+    alreadySleep: Bool,
+    appForeground: Bool
+  ) -> CompanionLifeMode {
+    let inBed = hour >= CompanionLifeMode.bedtimeHour || hour < CompanionLifeMode.wakeHour
+    let canWake = appForeground
+      && hour >= CompanionLifeMode.wakeHour
+      && hour < CompanionLifeMode.bedtimeHour
+
+    let dayMode: CompanionLifeMode = {
+      if onHome == false && hour >= 7 && hour < 19 { return .work }
+      return .indoor
+    }()
+
+    if alreadySleep {
+      return canWake ? dayMode : .sleep
     }
-    if !onHome && hour >= 7 && hour < 19 {
-      return .work
-    }
-    return .indoor
+    if inBed { return .sleep }
+    return dayMode
   }
 
   private func isCharging() -> Bool {
@@ -138,7 +200,6 @@ final class ContextTelemetryService: ObservableObject {
   private func recentStepsApprox() async -> Int {
     let today = HealthKitStepsService.shared.todaySteps
     let hour = max(1, Calendar.current.component(.hour, from: Date()))
-    // Estimativa grosseira da “atividade recente” a partir do ritmo do dia.
     return min(today, Int(Double(today) / Double(hour) * 2.0))
   }
 }

@@ -26,6 +26,7 @@ Deno.serve(async (req) => {
     homeWifiSsid?: string;
     xboxGamertag?: string;
     ackMorning?: boolean;
+    appForeground?: boolean;
   };
   try {
     body = await req.json();
@@ -48,21 +49,20 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Prefetch gamertag for Xbox enrichment
   const { data: rows } = await sb
     .from("Companion")
     .select("xboxGamertag, lifeMode")
     .eq("userId", userId)
     .order("createdAt", { ascending: true })
     .limit(1);
-  const gamertag = (rows?.[0]?.xboxGamertag as string | null) || body.xboxGamertag || null;
 
   let gamingStatus: string | null = null;
-  // Xbox só faz sentido no sofá — pré-checagem leve; RPC decide o modo final
-  const maybeIndoor =
-    body.onHomeWifi === true ||
-    (typeof body.localHour === "number" && (body.localHour >= 18 || body.localHour < 7));
-  if (maybeIndoor && gamertag) {
+  const gamertag =
+    (rows?.[0]?.xboxGamertag as string | null) || body.xboxGamertag || null;
+
+  // Prefetch Xbox when likely indoor OR always light-check if gamertag set
+  // (RPC decides final lifeMode; we refresh gaming after)
+  if (gamertag && (body.onHomeWifi === true || body.mediaActive === true)) {
     const xbox = await fetchXboxStatus(gamertag);
     if (xbox) gamingStatus = xbox.line;
   }
@@ -78,15 +78,17 @@ Deno.serve(async (req) => {
     p_media_active: Boolean(body.mediaActive),
     p_media_hint: body.mediaHint ?? null,
     p_gaming_status: gamingStatus,
+    p_app_foreground: Boolean(body.appForeground),
   });
 
   if (error) return json({ error: error.message }, 500);
 
   let result = data as Record<string, unknown>;
-  // Se acabou indoor e ainda não temos gaming, tenta de novo
-  if (result?.lifeMode === "indoor" && gamertag && !gamingStatus) {
+
+  // Se indoor e ainda sem gamingStatus fresco, busca OpenXBL
+  if (result?.lifeMode === "indoor" && gamertag) {
     const xbox = await fetchXboxStatus(gamertag);
-    if (xbox) {
+    if (xbox && xbox.line !== result.gamingStatus) {
       await sb.rpc("companion_ingest_context", {
         p_user_id: userId,
         p_on_home_wifi: body.onHomeWifi ?? true,
@@ -98,6 +100,7 @@ Deno.serve(async (req) => {
         p_media_active: Boolean(body.mediaActive),
         p_media_hint: body.mediaHint ?? null,
         p_gaming_status: xbox.line,
+        p_app_foreground: Boolean(body.appForeground),
       });
       result.gamingStatus = xbox.line;
     }
@@ -107,5 +110,31 @@ Deno.serve(async (req) => {
     await sb.rpc("companion_ack_morning_thought", { p_user_id: userId });
   }
 
-  return json({ ok: true, ...(result as object) });
+  // Pensamento de mídia (feed + título DJ do Sofá)
+  const mediaHint =
+    typeof result.mediaHint === "string" ? result.mediaHint.trim() : "";
+  if (body.mediaActive === true && mediaHint.length > 0) {
+    await sb.rpc("companion_append_thought", {
+      p_user_id: userId,
+      p_text: `Ouvindo: ${mediaHint}`,
+      p_kind: "music",
+      p_zone_name: null,
+    });
+  }
+
+  // Sync títulos (unlock append-only; não força re-equip)
+  const { data: title } = await sb.rpc("companion_refresh_titles_for_user", {
+    p_user_id: userId,
+  });
+  if (typeof title === "string" && title.length > 0) {
+    result.activeTitle = title;
+  }
+
+  // Return latest thoughts so iOS can sync feed
+  const { data: thoughts } = await sb.rpc("companion_list_thoughts", {
+    p_user_id: userId,
+    p_limit: 40,
+  });
+
+  return json({ ok: true, ...(result as object), thoughts: thoughts ?? [] });
 });

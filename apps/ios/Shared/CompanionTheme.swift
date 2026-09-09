@@ -46,14 +46,15 @@ struct StatBar: View {
   let color: Color
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: 5) {
       HStack(spacing: 6) {
         Image(systemName: systemImage)
+          .font(.caption2)
           .foregroundStyle(color)
         Text(title)
           .font(.caption.weight(.semibold))
           .foregroundStyle(CompanionTheme.subtitle)
-        Spacer()
+        Spacer(minLength: 4)
         Text("\(value)%")
           .font(.caption.monospacedDigit().weight(.bold))
           .foregroundStyle(CompanionTheme.title)
@@ -66,7 +67,7 @@ struct StatBar: View {
             .frame(width: max(8, geo.size.width * CGFloat(value) / 100))
         }
       }
-      .frame(height: 10)
+      .frame(height: 8)
     }
   }
 }

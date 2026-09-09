@@ -30,13 +30,16 @@ CLI local (se não estiver no PATH): `.tools/supabase`.
 
 ## Survival (servidor)
 
-- `companion_apply_decay(id)` — no-op **somente** se `decayFrozen` (modo sleep).
+- `companion_apply_decay(id)` — por `lifeMode`:
+  - **indoor** → recupera energia; afeto cai bem devagar
+  - **work** → gasta energia (tempo + passos recentes)
+  - **sleep** / `decayFrozen` → no-op físico
 - `companion_apply_interaction(id, type)` — deltas autoritativos.
-- `companion_tick_all()` — cron; sem auto-expedition por hardware.
+- `companion_tick_all()` — cron; decay + chance de thought `rest`/`work`/`dream`
 - `companion_ingest_context(...)` — lifeMode + `presenceStatus` espelhado:
-  - `indoor` → `present`
-  - `work` → `away` (decay **continua** ativo)
-  - `sleep` → `expedition` + `decayFrozen=true`
+  - `indoor` → `present` (recupera energia)
+  - `work` → `away` (consome energia)
+  - `sleep` → `expedition` + `decayFrozen=true` (sonhos no feed)
 - Spec: `src/survivalSpec.ts`
 
 ## iOS passivo
@@ -44,4 +47,5 @@ CLI local (se não estiver no PATH): `.tools/supabase`.
 - HealthKit → `POST /steps-ingest`
 - Contexto Wi‑Fi / carga / hora → `POST /context-ingest`
 - Spotify → `mediaHint`; Xbox (OpenXBL) → `gamingStatus` em indoor
+- Feed autoritativo → tabela `CompanionThought` + Edge `GET|POST /thoughts`
 - Home = feed de pensamentos; widgets → `companion://feed`

@@ -13,5 +13,8 @@ verify_jwt = true
 [functions.context-ingest]
 verify_jwt = true
 
+[functions.thoughts]
+verify_jwt = true
+
 [functions.tick-decay]
 verify_jwt = false

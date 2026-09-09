@@ -30,25 +30,47 @@ struct SettingsView: View {
     .toolbarBackground(.visible, for: .navigationBar)
     .toolbarBackground(Color.white.opacity(0.92), for: .navigationBar)
     .toolbarColorScheme(.light, for: .navigationBar)
+    .scrollDismissesKeyboard(.interactively)
+    .toolbar {
+      ToolbarItemGroup(placement: .keyboard) {
+        Spacer()
+        Button("OK") { dismissKeyboard() }
+      }
+    }
   }
 
   private var header: some View {
     CompanionCard {
-      HStack(spacing: 12) {
-        DinoStaticFrame(skin: model.snapshot.skin, size: 48)
-        VStack(alignment: .leading, spacing: 4) {
-          Text(model.snapshot.name)
-            .font(.title3.bold())
-            .foregroundStyle(CompanionTheme.title)
-          Text(LocalVoice.archetypeLabel(model.snapshot.archetype))
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(CompanionTheme.play)
-          Text("Ajustes do companion")
-            .font(.caption)
+      NavigationLink {
+        ProfileView(model: model)
+      } label: {
+        HStack(spacing: 12) {
+          DinoStaticFrame(skin: model.snapshot.skin, size: 48)
+          VStack(alignment: .leading, spacing: 4) {
+            Text(model.snapshot.name)
+              .font(.title3.bold())
+              .foregroundStyle(CompanionTheme.title)
+            if let title = model.snapshot.activeTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !title.isEmpty {
+              Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(CompanionTheme.play)
+            } else {
+              Text(LocalVoice.archetypeLabel(model.snapshot.archetype))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(CompanionTheme.play)
+            }
+            Text("Ver perfil e badges")
+              .font(.caption)
+              .foregroundStyle(CompanionTheme.subtitle)
+          }
+          Spacer()
+          Image(systemName: "chevron.right")
+            .font(.caption.weight(.bold))
             .foregroundStyle(CompanionTheme.subtitle)
         }
-        Spacer()
       }
+      .buttonStyle(.plain)
     }
   }
 
@@ -59,32 +81,22 @@ struct SettingsView: View {
           .font(.headline)
           .foregroundStyle(CompanionTheme.title)
         Text(SupabaseConfig.isConfigured
-          ? "Cloud automático: sessão salva no aparelho (sem pedir login)."
+          ? "Entre com email e senha. O companion fica vinculado à conta na nuvem."
           : "Cloud não configurado neste build.")
           .font(.caption)
           .foregroundStyle(CompanionTheme.subtitle)
-        if model.isLoggedIn {
+        if model.hasRealAccount {
           Text(model.accountEmail)
             .font(.subheadline)
             .foregroundStyle(CompanionTheme.subtitle)
-          if model.accountEmail == "convidado" {
-            Text("Convidado neste iPhone. Opcional: vincular email para o mesmo pet no Mac.")
-              .font(.caption2)
-              .foregroundStyle(CompanionTheme.subtitle)
-            NavigationLink("Vincular email / senha") {
-              LoginView(model: model)
-            }
-            .font(.subheadline.weight(.bold))
-            Button("Limpar sessão neste iPhone") { model.logout() }
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(.red)
-          } else {
-            Button("Sair da conta") { model.logout() }
-              .foregroundStyle(.red)
-            Text("Sair apaga o companion deste aparelho e o da cloud desta conta, e reabre o quiz.")
-              .font(.caption2)
-              .foregroundStyle(CompanionTheme.subtitle)
+          Button("Sair da conta") {
+            dismissKeyboard()
+            model.logout()
           }
+          .foregroundStyle(.red)
+          Text("Sair limpa só este iPhone. O companion na cloud permanece na conta.")
+            .font(.caption2)
+            .foregroundStyle(CompanionTheme.subtitle)
         } else {
           NavigationLink("Entrar / criar conta") {
             LoginView(model: model)
@@ -140,7 +152,7 @@ struct SettingsView: View {
             .font(.caption2)
             .foregroundStyle(CompanionTheme.subtitle)
         }
-        Text("Login com a conta Spotify de cada pessoa. YouTube/Safari não liberam a faixa.")
+        Text("Login com a conta Spotify. No carro: o app só vê a faixa se o Spotify estiver conectado aqui e tocando na conta (API). Apple Music / rádio do carro não aparecem.")
           .font(.caption2)
           .foregroundStyle(CompanionTheme.subtitle)
 
@@ -151,12 +163,23 @@ struct SettingsView: View {
         Text("SSID da casa: \(LifeModeStore.homeWifiSsid ?? "não definido")")
           .font(.caption)
           .foregroundStyle(CompanionTheme.subtitle)
-        Button("Marcar Wi‑Fi atual como casa") {
+        if !ContextTelemetryService.shared.locationAuthorized {
+          Text("Localização necessária para ler o nome da rede Wi‑Fi.")
+            .font(.caption2)
+            .foregroundStyle(.orange)
+        }
+        Button("Permitir localização / marcar Wi‑Fi como casa") {
           Task {
+            let ok = await ContextTelemetryService.shared.ensureLocationForWifiSsid()
+            if !ok {
+              model.reaction = "Ative Localização → Durante o uso do app em Ajustes do iPhone."
+              return
+            }
             if let ssid = await ContextTelemetryService.shared.captureCurrentSsidAsHome() {
               model.reaction = "Rede de casa: \(ssid)"
             } else {
-              model.reaction = "Não li o SSID (precisa permissão de Localização / Wi‑Fi Info). Digite o nome abaixo."
+              model.reaction =
+                "Localização ok. Se o nome da rede não aparecer, digite o SSID abaixo (Access Wi‑Fi Info exige conta Apple Developer paga)."
             }
           }
         }
@@ -167,14 +190,19 @@ struct SettingsView: View {
         ))
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
+        .submitLabel(.done)
+        .onSubmit { dismissKeyboard() }
         TextField("Gamertag Xbox (opcional)", text: Binding(
           get: { LifeModeStore.xboxGamertag ?? "" },
           set: { LifeModeStore.xboxGamertag = $0.isEmpty ? nil : $0 }
         ))
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
+        .submitLabel(.done)
+        .onSubmit { dismissKeyboard() }
         Button("Salvar contexto na cloud") {
           Task {
+            _ = await ContextTelemetryService.shared.ensureLocationForWifiSsid()
             await ContextTelemetryService.shared.ingestNow()
             model.reaction = "Contexto enviado · \(ContextTelemetryService.shared.lastLifeMode.labelPT)"
           }
@@ -183,6 +211,9 @@ struct SettingsView: View {
         Text("Modo agora: \(CompanionLifeMode.parse(model.snapshot.lifeMode).labelPT)")
           .font(.caption2)
           .foregroundStyle(CompanionTheme.play)
+          .onAppear {
+            Task { _ = await ContextTelemetryService.shared.ensureLocationForWifiSsid() }
+          }
 
         Toggle("Pegadinhas", isOn: Binding(
           get: { model.pranksEnabled },
@@ -190,17 +221,6 @@ struct SettingsView: View {
         ))
         .foregroundStyle(CompanionTheme.title)
         .tint(CompanionTheme.play)
-        Toggle("Evolução (beta)", isOn: Binding(
-          get: { model.growthEnabled },
-          set: { model.setGrowthEnabled($0) }
-        ))
-        .foregroundStyle(CompanionTheme.title)
-        .tint(CompanionTheme.play)
-        Text(model.growthEnabled
-          ? "Ligado: stages baby→teen→adult (arte ainda em teste)."
-          : "Desligado: só a forma base. Recomendado por enquanto.")
-          .font(.caption2)
-          .foregroundStyle(CompanionTheme.subtitle)
         Toggle("Avisar energia baixa", isOn: Binding(
           get: { model.lowEnergyNotifEnabled },
           set: { on in Task { await model.setLowEnergyNotif(on) } }
@@ -292,8 +312,8 @@ struct SettingsView: View {
         Text("Status")
           .font(.headline)
           .foregroundStyle(CompanionTheme.title)
-        row("Modo", model.useLanAPI ? "API Mac" : (model.isLoggedIn ? "Supabase" : "Standalone"))
-        row("Conta", model.isLoggedIn ? model.accountEmail : "—")
+        row("Modo", model.useLanAPI ? "API Mac" : (model.hasRealAccount ? "Supabase" : "Standalone"))
+        row("Conta", model.hasRealAccount ? model.accountEmail : "—")
         row("Supabase", SupabaseConfig.isConfigured ? "Configurado" : "Falta URL/key")
         row("LLM", KeychainStore.hasAnyLLMKey ? "Com chave" : "Frases locais")
         row("Música", model.nowPlayingEnabled ? "On" : "Off")
@@ -312,5 +332,16 @@ struct SettingsView: View {
         .minimumScaleFactor(0.7)
     }
     .font(.subheadline)
+  }
+
+  private func dismissKeyboard() {
+    #if canImport(UIKit)
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder),
+      to: nil,
+      from: nil,
+      for: nil
+    )
+    #endif
   }
 }

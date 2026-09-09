@@ -1,8 +1,10 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/supabase.ts";
 
-/** Schedule via Supabase Dashboard Cron → this function every 10 minutes.
- *  Header: Authorization: Bearer <SERVICE_ROLE> or x-cron-secret.
+/**
+ * Cron a cada ~10 min.
+ * companion_tick_all: decay + minutos de convivência + títulos +
+ * sonhos oníricos com último mediaHint / gamingStatus do dia.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -21,5 +23,17 @@ Deno.serve(async (req) => {
   const sb = serviceClient();
   const { data, error } = await sb.rpc("companion_tick_all");
   if (error) return json({ error: error.message }, 500);
-  return json({ ok: true, ticked: data });
+
+  // Contagem leve de companions em sono (observabilidade)
+  const { count } = await sb
+    .from("Companion")
+    .select("id", { count: "exact", head: true })
+    .eq("lifeMode", "sleep");
+
+  return json({
+    ok: true,
+    ticked: data,
+    sleeping: count ?? 0,
+    dreams: "mediaHint/gamingStatus injected via companion_pick_dream_line",
+  });
 });

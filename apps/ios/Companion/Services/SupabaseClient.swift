@@ -190,17 +190,26 @@ actor SupabaseClient {
     }
   }
 
-  /// Mantém o usuário na nuvem sem pedir email: refresh/valida ou login anônimo.
+  /// Restaura sessão válida (refresh se preciso). **Não** cria anônimo —
+  /// o app exige email/senha antes do quiz/home.
   @discardableResult
   func ensurePersistentSession() async -> SupabaseSession? {
     guard SupabaseConfig.isConfigured else { return nil }
-    if let s = await validSession() { return s }
-    do {
-      return try await signInAnonymously()
-    } catch {
-      print("[supabase] anonymous failed: \(error.localizedDescription)")
+    guard let s = await validSession() else { return nil }
+    // Sessões anônimas antigas não contam como conta real.
+    if s.isAnonymous {
+      saveSession(nil)
       return nil
     }
+    return s
+  }
+
+  /// Sessão com email (não anônima).
+  func requireAccountSession() async throws -> SupabaseSession {
+    guard let s = await ensurePersistentSession() else {
+      throw SupabaseError.noSession
+    }
+    return s
   }
 
   /// Apaga tokens do Keychain neste iPhone (não chama a API de delete user).
@@ -378,8 +387,7 @@ actor SupabaseClient {
   }
 
   private func requireSession() async throws -> SupabaseSession {
-    if let s = await validSession() { return s }
-    throw SupabaseError.noSession
+    try await requireAccountSession()
   }
 
   private func upsertProfile(_ session: SupabaseSession) async throws {
@@ -416,6 +424,10 @@ actor SupabaseClient {
     var morningThought: String?
     var homeWifiSsid: String?
     var xboxGamertag: String?
+    var activeTitle: String?
+    var titleKey: String?
+    var equippedTitleKey: String?
+    var unlockedTitles: [String]?
     /// Presente após quiz v3; ausência = precisa refazer o questionário.
     var traits: TraitsPayload?
 
@@ -474,12 +486,17 @@ actor SupabaseClient {
       var ok: Bool?
       var companion: RemoteCompanion?
       var context: ContextPayload?
+      var thoughts: [CloudThoughtDTO]?
+      var profile: ProfileStatsDTO?
     }
     struct ContextPayload: Codable {
       var lifeMode: String?
       var gamingStatus: String?
       var mediaHint: String?
       var morningThought: String?
+      var activeTitle: String?
+      var titleKey: String?
+      var equippedTitleKey: String?
     }
     if let env = try? JSONDecoder().decode(Envelope.self, from: data), let row = env.companion {
       var snap = snapshot(from: row)
@@ -488,6 +505,9 @@ actor SupabaseClient {
         if let g = ctx.gamingStatus { snap.gamingStatus = g }
         if let media = ctx.mediaHint { snap.mediaHint = media }
         if let morning = ctx.morningThought { snap.morningThought = morning }
+        if let title = ctx.activeTitle { snap.activeTitle = title }
+        if let tk = ctx.titleKey { snap.titleKey = tk }
+        if let ek = ctx.equippedTitleKey { snap.equippedTitleKey = ek }
       }
       if let morning = snap.morningThought, !morning.isEmpty {
         LifeModeStore.pendingMorningThought = morning
@@ -497,6 +517,9 @@ actor SupabaseClient {
       }
       if let ssid = row.homeWifiSsid { LifeModeStore.homeWifiSsid = ssid }
       if let tag = row.xboxGamertag { LifeModeStore.xboxGamertag = tag }
+      if let thoughts = env.thoughts {
+        _ = ThoughtFeedStore.replaceAll(thoughts.map { ThoughtFeedStore.fromCloud($0) })
+      }
       return snap
     }
     return try await fetchMyCompanion()
@@ -532,6 +555,8 @@ actor SupabaseClient {
     var affection: Int?
     var mood: String?
     var presenceStatus: String?
+    var activeTitle: String?
+    var thoughts: [CloudThoughtDTO]?
   }
 
   /// Telemetria → lifeMode (work/indoor/sleep) + mídia/Xbox na cloud.
@@ -546,7 +571,8 @@ actor SupabaseClient {
     mediaHint: String?,
     homeWifiSsid: String?,
     xboxGamertag: String?,
-    ackMorning: Bool = false
+    ackMorning: Bool = false,
+    appForeground: Bool = false
   ) async throws -> ContextIngestResult {
     let session = try await requireSession()
     var body: [String: Any] = [
@@ -555,6 +581,7 @@ actor SupabaseClient {
       "isCharging": isCharging,
       "localHour": localHour,
       "mediaActive": mediaActive,
+      "appForeground": appForeground,
     ]
     if let onHomeWifi { body["onHomeWifi"] = onHomeWifi }
     if let ssid { body["ssid"] = ssid }
@@ -568,34 +595,74 @@ actor SupabaseClient {
       body: body,
       token: session.accessToken
     )
-    return try JSONDecoder().decode(ContextIngestResult.self, from: data)
+    let result = try JSONDecoder().decode(ContextIngestResult.self, from: data)
+    if let thoughts = result.thoughts {
+      _ = ThoughtFeedStore.replaceAll(thoughts.map { ThoughtFeedStore.fromCloud($0) })
+    }
+    return result
   }
 
-  /// Cria o companion após o quiz, persistindo `traits` (JSONB) + `userId` da sessão (Keychain).
+  func fetchThoughts(limit: Int = 40) async throws -> [ThoughtFeedEntry] {
+    let session = try await requireSession()
+    let data = try await request(
+      path: "/functions/v1/thoughts",
+      method: "GET",
+      query: "limit=\(limit)",
+      token: session.accessToken
+    )
+    struct Envelope: Codable {
+      var thoughts: [CloudThoughtDTO]?
+    }
+    let env = try JSONDecoder().decode(Envelope.self, from: data)
+    let mapped = (env.thoughts ?? []).map { ThoughtFeedStore.fromCloud($0) }
+    return ThoughtFeedStore.replaceAll(mapped)
+  }
+
+  @discardableResult
+  func appendThought(text: String, kind: String, zoneName: String?) async throws -> ThoughtFeedEntry {
+    let session = try await requireSession()
+    var body: [String: Any] = [
+      "text": text,
+      "kind": kind,
+    ]
+    if let zoneName { body["zoneName"] = zoneName }
+    let data = try await request(
+      path: "/functions/v1/thoughts",
+      method: "POST",
+      body: body,
+      token: session.accessToken
+    )
+    struct Envelope: Codable {
+      var thought: CloudThoughtDTO?
+    }
+    let env = try JSONDecoder().decode(Envelope.self, from: data)
+    if let t = env.thought {
+      let entry = ThoughtFeedStore.fromCloud(t)
+      _ = ThoughtFeedStore.append(entry)
+      return entry
+    }
+    let local = ThoughtFeedEntry.make(text: text, kind: kind, zoneName: zoneName)
+    _ = ThoughtFeedStore.append(local)
+    return local
+  }
+
+  /// Cria o companion após o quiz, persistindo `traits` (JSONB) + `userId` da sessão.
+  /// Se a conta já tem companion, **reusa** (nunca apaga / nunca duplica).
   func createCompanionFromQuiz(
     name: String,
     draft: CompanionQuiz.Draft,
     traits: CompanionQuiz.Traits
   ) async throws -> CompanionSnapshot {
-    // Garante sessão (refresh ou anônimo) antes do POST.
-    guard let session = await ensurePersistentSession() else {
-      throw SupabaseError.noSession
-    }
+    let session = try await requireAccountSession()
     let userId = KeychainStore.get(.supabaseUserId) ?? session.userId
     let iso = ISO8601DateFormatter()
     iso.formatOptions = [.withInternetDateTime]
     let now = iso.string(from: Date())
     let traitsPayload = traits.asDictionary
 
-    // Novo nascimento: não reaproveita row antiga (evita “mesmo dino” após apagar conta / refazer quiz).
+    // Conta já vinculada a um pet → adota o da cloud (não cria segundo / não apaga).
     if let existing = try await fetchMyCompanion() {
-      _ = try await request(
-        path: "/rest/v1/Companion",
-        method: "DELETE",
-        query: "id=eq.\(existing.id)",
-        token: session.accessToken,
-        prefer: "return=minimal"
-      )
+      return existing
     }
 
     let id = "cmp_\(UUID().uuidString.prefix(12))"
@@ -644,7 +711,10 @@ actor SupabaseClient {
       lifeMode: "indoor",
       gamingStatus: nil,
       mediaHint: nil,
-      morningThought: nil
+      morningThought: nil,
+      activeTitle: "Recém-chegado",
+      titleKey: "newcomer",
+      equippedTitleKey: "newcomer"
     )
   }
 
@@ -909,7 +979,82 @@ actor SupabaseClient {
       lifeMode: row.lifeMode ?? "indoor",
       gamingStatus: row.gamingStatus,
       mediaHint: row.mediaHint,
-      morningThought: row.morningThought
+      morningThought: row.morningThought,
+      activeTitle: row.activeTitle,
+      titleKey: row.titleKey ?? row.equippedTitleKey,
+      equippedTitleKey: row.equippedTitleKey ?? row.titleKey
     )
+  }
+
+  struct BadgeDTO: Codable, Identifiable, Sendable {
+    var key: String
+    var label: String?
+    var symbol: String?
+    var description: String?
+    var unlocked: Bool?
+    var equipped: Bool?
+    var progress: Double?
+    var target: Double?
+    var unit: String?
+    var hint: String?
+    var rarity: Int?
+
+    var id: String { key }
+  }
+
+  struct ProfileStatsDTO: Codable, Sendable {
+    var ok: Bool?
+    var name: String?
+    var skin: String?
+    var activeTitle: String?
+    var titleKey: String?
+    var equippedTitleKey: String?
+    var unlockedTitles: [String]?
+    var indoorMinutes: Int?
+    var workMinutes: Int?
+    var sleepMinutes: Int?
+    var indoorHours: Double?
+    var workHours: Double?
+    var sleepHours: Double?
+    var musicCount: Int?
+    var gamingCount: Int?
+    var dreamCount: Int?
+    var daysAlive: Double?
+    var badges: [BadgeDTO]?
+    var error: String?
+  }
+
+  struct EquipTitleResult: Codable, Sendable {
+    var ok: Bool?
+    var equippedTitleKey: String?
+    var activeTitle: String?
+    var titleKey: String?
+    var error: String?
+  }
+
+  func fetchProfileStats() async throws -> ProfileStatsDTO {
+    let session = try await requireSession()
+    let data = try await request(
+      path: "/rest/v1/rpc/companion_profile_stats",
+      method: "POST",
+      body: ["p_user_id": session.userId],
+      token: session.accessToken
+    )
+    return try JSONDecoder().decode(ProfileStatsDTO.self, from: data)
+  }
+
+  func equipTitle(_ titleKey: String) async throws -> EquipTitleResult {
+    let session = try await requireSession()
+    let data = try await request(
+      path: "/rest/v1/rpc/companion_equip_title",
+      method: "POST",
+      body: ["p_user_id": session.userId, "p_title_key": titleKey],
+      token: session.accessToken
+    )
+    let result = try JSONDecoder().decode(EquipTitleResult.self, from: data)
+    if result.ok != true {
+      throw SupabaseError.http(400, result.error ?? "equip_failed")
+    }
+    return result
   }
 }

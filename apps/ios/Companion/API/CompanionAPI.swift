@@ -308,7 +308,10 @@ actor CompanionAPI {
       lifeMode: nil,
       gamingStatus: nil,
       mediaHint: nil,
-      morningThought: nil
+      morningThought: nil,
+      activeTitle: nil,
+      titleKey: nil,
+      equippedTitleKey: nil
     )
   }
 }

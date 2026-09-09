@@ -6,16 +6,39 @@ enum CompanionLifeMode: String, Codable, Sendable {
   case indoor
   case sleep
 
+  /// Hora local de dormir / acordar (alinhado ao SQL).
+  static let bedtimeHour = 23
+  static let wakeHour = 6
+
   static func parse(_ raw: String?) -> CompanionLifeMode {
     guard let raw else { return .indoor }
     return CompanionLifeMode(rawValue: raw.lowercased()) ?? .indoor
   }
 
+  static var localHour: Int {
+    Calendar.current.component(.hour, from: Date())
+  }
+
+  /// Ainda é madrugada: dormindo / sonolento (antes das 6h).
+  var isPreWakeDrowsy: Bool {
+    self == .sleep && Self.localHour < Self.wakeHour
+  }
+
   var labelPT: String {
     switch self {
-    case .work: return "Trabalho / campo"
-    case .indoor: return "Sofá / lazer"
-    case .sleep: return "Sono / hibernação"
+    case .work: return "Trabalho / rua"
+    case .indoor: return "Sofá / regenerando"
+    case .sleep:
+      return isPreWakeDrowsy ? "Meio dormindo" : "Sono / sonhos"
+    }
+  }
+
+  /// Intervalo mínimo entre pensamentos autônomos no feed (segundos).
+  var thoughtCooldownSec: TimeInterval {
+    switch self {
+    case .indoor: return 180
+    case .work: return 240
+    case .sleep: return 360
     }
   }
 
@@ -23,11 +46,18 @@ enum CompanionLifeMode: String, Codable, Sendable {
   var llmToneHint: String {
     switch self {
     case .work:
-      return "Modo trabalho/campo: tom de esforço físico, resistência e dia na rua. Sem frescura de escritório de TI."
+      return "Modo trabalho/rua: cansaço do dia, passos, esforço físico. Energia caindo. Sem frescura de escritório."
     case .indoor:
-      return "Modo indoor/sofá: recuperação, ociosidade na sala/TV, entretenimento e presença em casa."
+      return "Modo indoor/sofá: recuperando energia em casa, lazer, TV/som, regeneração passiva."
     case .sleep:
-      return "Modo sono: silêncio, hibernação. Frases curtas ou pensamento matinal guardado."
+      if isPreWakeDrowsy {
+        return """
+        Você ainda está MEIO DORMINDO (antes das 6h). Como pessoa de verdade que acordou no meio da noite:
+        voz baixa, respostas curtas, bocejo, sem empolgação. Pode papear um pouco, mas quer voltar a dormir.
+        Não finja estar 100% acordado. Sem história longa.
+        """
+      }
+      return "Modo sonhos: frases oníricas, surreais, curtas — histórias leves enquanto dorme. Sem spam."
     }
   }
 }

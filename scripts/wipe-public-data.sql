@@ -1,5 +1,6 @@
 -- Wipe app data (public schema) — sem tabelas IoT (removidas)
 TRUNCATE TABLE
+  "CompanionThought",
   "Interaction",
   "Companion",
   "UserMissionProgress",

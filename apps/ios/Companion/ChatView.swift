@@ -28,7 +28,9 @@ struct ChatView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
           .onChange(of: turns.count) { _ in
             scrollToBottom(proxy)
           }
@@ -177,6 +179,7 @@ struct ChatTurn: Identifiable {
   let id: String
   let isUser: Bool
   let text: String
+  var createdAt: Date = Date()
 }
 
 struct MissionsSheet: View {

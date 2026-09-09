@@ -4,16 +4,16 @@ enum LLMService {
   private static let nvidiaURL = URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!
   private static let openrouterURL = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
 
-  /// Race: Lightning (strip) → Gemma → dots → gpt-oss NIM.
+  /// Ordem por qualidade (não race pelo mais rápido/fraco).
   private static let openrouterModels = [
-    "nvidia/nemotron-3.5-lightning:free",
     "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3.5-lightning:free",
     "dots-studio/dots-3-note-preview:free",
   ]
   private static let nvidiaModels = [
     "openai/gpt-oss-20b",
   ]
-  private static let timeout: TimeInterval = 6
+  private static let timeout: TimeInterval = 14
 
   private static let badLine = try! NSRegularExpression(
     pattern: #"user\s*says|here's a thinking|thinking process|analyze user|as an ai|system:|assistant:|the user|okay,? the user|let me check|respond in portuguese|fale agora|só a frase|step \d|^\d+\.\s+\*\*"#,
@@ -68,10 +68,10 @@ enum LLMService {
         "role": "system",
         "content": [
           "Voce e \(name), companion virtual.",
-          "Personalidade: \(personality). Arquétipo: \(archetype). Fale em \(tone).",
+          "Personalidade: \(personality). Fale em \(tone).",
           "O usuario acabou de mudar de musica no Spotify.",
           "Comente a faixa como amigo que pegou a vibe/tema (sem inventar citacao longa de letra).",
-          "Uma frase em portugues do Brasil, primeira pessoa, maximo 20 palavras.",
+          "Uma frase em portugues do Brasil, primeira pessoa, maximo 24 palavras.",
           "Nao explique raciocinio. So a fala.",
         ].joined(separator: " "),
       ],
@@ -96,7 +96,8 @@ enum LLMService {
         mood: params.mood,
         type: type,
         userMessage: params.userMessage,
-        growthStage: params.growthStage
+        growthStage: params.growthStage,
+        energy: params.energy
       )
     }
 
@@ -104,7 +105,6 @@ enum LLMService {
     let lastHist = params.history.suffix(2).map { "\($0.role):\($0.content)" }.joined(separator: "|")
     let cacheKey = "\(companionId)::\(msg.lowercased())::\(lastHist.hashValue)"
     if msg.count >= 12, let hit = cache[cacheKey], Date().timeIntervalSince(hit.at) < 30 {
-      // Não reusa reply off-topic / evolução falsa.
       if SpeechFilters.acceptReply(hit.text, user: msg) {
         return hit.text
       }
@@ -116,7 +116,6 @@ enum LLMService {
       guard turn.role == "assistant" else { return true }
       return !SpeechFilters.isMoodBurst(turn.content) && !SpeechFilters.isStaleAssistantNoise(turn.content)
     }
-    // Música só entra no prompt se o usuário estiver falando de música.
     if !SpeechFilters.isMusicTopic(msg) {
       working.musicHint = nil
     }
@@ -131,7 +130,7 @@ enum LLMService {
           description: snap.description,
           archetype: params.archetype
         )
-        if let colored = await raceProviders(messages: buildMessages(working), userMessage: msg),
+        if let colored = await bestProviderReply(messages: buildMessages(working), userMessage: msg),
            colored.contains("\(snap.tempC)"),
            !isBad(colored) {
           if msg.count >= 12 { cache[cacheKey] = (colored, Date()) }
@@ -145,7 +144,7 @@ enum LLMService {
     }
 
     let messages = buildMessages(working)
-    if let text = await raceProviders(messages: messages, userMessage: msg),
+    if let text = await bestProviderReply(messages: messages, userMessage: msg),
        SpeechFilters.acceptReply(text, user: msg) {
       if msg.count >= 12 { cache[cacheKey] = (text, Date()) }
       return text
@@ -155,56 +154,88 @@ enum LLMService {
       name: params.name,
       archetype: params.archetype,
       userMessage: params.userMessage,
-      growthStage: params.growthStage
+      growthStage: params.growthStage,
+      energy: Int(params.energy.rounded())
     )
   }
 
-  /// Dispara OpenRouter + NVIDIA em paralelo; primeiro texto limpo ganha.
-  private static func raceProviders(messages: [[String: String]], userMessage: String) async -> String? {
-    await withTaskGroup(of: String?.self) { group in
-      if let key = KeychainStore.get(.openrouter) {
-        let headers = [
-          "HTTP-Referer": "https://companion.local",
-          "X-Title": "Companion iOS",
-        ]
-        for model in openrouterModels {
-          let maxTok = model.contains("lightning") || model.contains("dots") ? 220 : 120
-          group.addTask {
-            let raw = try? await callChat(
-              url: openrouterURL,
-              apiKey: key,
-              model: model,
-              messages: messages,
-              extraHeaders: headers,
-              maxTokens: maxTok
-            )
-            return raw.flatMap { cleanSpeech($0, userMessage: userMessage) }
-          }
-        }
-      }
-      if let key = KeychainStore.get(.nvidia) {
-        for model in nvidiaModels {
-          group.addTask {
-            let raw = try? await callChat(
-              url: nvidiaURL,
-              apiKey: key,
-              model: model,
-              messages: messages,
-              extraHeaders: nil,
-              maxTokens: 220
-            )
-            return raw.flatMap { cleanSpeech($0, userMessage: userMessage) }
-          }
-        }
-      }
+  /// Tenta provedores em ordem (qualidade), não “primeiro fraco ganha”.
+  private static func bestProviderReply(messages: [[String: String]], userMessage: String) async -> String? {
+    var candidates: [(model: String, text: String)] = []
 
-      for await result in group {
-        if let text = result, !text.isEmpty, !isBad(text), SpeechFilters.acceptReply(text, user: userMessage) {
-          group.cancelAll()
-          return text
+    if let key = KeychainStore.get(.nvidia) {
+      for model in nvidiaModels {
+        if let raw = try? await callChat(
+          url: nvidiaURL,
+          apiKey: key,
+          model: model,
+          messages: messages,
+          extraHeaders: nil,
+          maxTokens: 640
+        ), let text = cleanSpeech(raw, userMessage: userMessage),
+           !isBad(text), SpeechFilters.acceptReply(text, user: userMessage) {
+          candidates.append((model, text))
+          if scoreReply(text, user: userMessage) >= 8 { return text }
         }
       }
-      return nil
+    }
+
+    if let key = KeychainStore.get(.openrouter) {
+      let headers = [
+        "HTTP-Referer": "https://companion.local",
+        "X-Title": "Companion iOS",
+      ]
+      for model in openrouterModels {
+        if let raw = try? await callChat(
+          url: openrouterURL,
+          apiKey: key,
+          model: model,
+          messages: messages,
+          extraHeaders: headers,
+          maxTokens: 640
+        ), let text = cleanSpeech(raw, userMessage: userMessage),
+           !isBad(text), SpeechFilters.acceptReply(text, user: userMessage) {
+          candidates.append((model, text))
+          if scoreReply(text, user: userMessage) >= 8 { return text }
+        }
+      }
+    }
+
+    return candidates.max(by: { scoreReply($0.text, user: userMessage) < scoreReply($1.text, user: userMessage) })?.text
+  }
+
+  /// Compat: musicComment ainda chama raceProviders.
+  private static func raceProviders(messages: [[String: String]], userMessage: String) async -> String? {
+    await bestProviderReply(messages: messages, userMessage: userMessage)
+  }
+
+  private static func scoreReply(_ text: String, user: String) -> Int {
+    let words = text.split { $0.isWhitespace || $0.isNewline }.count
+    var score = min(words, 40)
+    let lower = text.lowercased()
+    // Penaliza eco do rótulo de arquétipo / respostas vazias
+    for bad in ["zoeiro", "curioso", "preguicoso", "carinhoso", "misterioso", "arquétipo", "arquetipo"] {
+      if lower.contains(bad) { score -= 6 }
+    }
+    if SpeechFilters.isMoodBurst(text) { score -= 10 }
+    if SpeechFilters.isStatusEnvironmentLog(text) { score -= 12 }
+    if SpeechFilters.isPromptLeak(text) || SpeechFilters.isTruncatedSpeech(text) { score -= 15 }
+    if words < 4 { score -= 5 }
+    if !user.isEmpty, words >= 6 { score += 2 }
+    // Penaliza corte abrupto (sem pontuação final em resposta longa)
+    if words >= 12, !(text.hasSuffix(".") || text.hasSuffix("!") || text.hasSuffix("?") || text.hasSuffix("…")) {
+      score -= 4
+    }
+    return score
+  }
+
+  private static func archetypeTone(_ archetype: String) -> String {
+    switch archetype.lowercased() {
+    case "preguicoso": return "preguicoso, sarcastico e preguicosamente carinhoso"
+    case "carinhoso": return "carinhoso, caloroso e grudento de um jeito leve"
+    case "zoeiro": return "zoeiro, dramatico e brincalhao — humor sem forcar piada"
+    case "misterioso": return "misterioso, filosofico e economico nas palavras"
+    default: return "curioso, atento e amigo de verdade"
     }
   }
 
@@ -221,68 +252,64 @@ enum LLMService {
       }
     }()
 
-    let tone: String = {
-      switch params.archetype {
-      case "preguicoso": return "Fale preguicoso e sarcastico, frases curtas."
-      case "carinhoso": return "Fale carinhoso e grudento."
-      case "zoeiro": return "Fale zoeiro e dramatico."
-      case "misterioso": return "Fale misterioso e filosofico."
-      default: return "Fale curioso e atento; pergunta só se fizer sentido no momento."
-      }
-    }()
+    let maxWords = Growth.chatWordLimit(energy: params.energy)
+    let energyPct = Int(params.energy.rounded())
 
-    let stage = Growth.normalize(params.growthStage)
-    let maxWords = Growth.wordLimit(for: stage)
+    let energyTone: String
+    if energyPct < 18 {
+      energyTone = """
+      Voce esta EXAUSTO (energia \(energyPct)). Seja humano: cansado, pouca vontade de papo longo, respostas mais curtas.
+      Ainda responde o assunto com honestidade. Sem animacao falsa.
+      """
+    } else if energyPct < 40 {
+      energyTone = """
+      Voce esta cansado (energia \(energyPct)). Demonstre com naturalidade (bocejo, pouca empolgacao), mas ainda converse de verdade sobre o que perguntaram.
+      """
+    } else {
+      energyTone = "Energia \(energyPct): disposto. Responda com vida e personalidade."
+    }
+
+    let persona = params.personality.trimmingCharacters(in: .whitespacesAndNewlines)
+    let personaLine = persona.isEmpty || persona == params.archetype
+      ? "Tom: \(archetypeTone(params.archetype))."
+      : "Personalidade: \(persona). Tom: \(archetypeTone(params.archetype))."
 
     var system = [
-      "Voce e \(params.name), companion virtual e amigo de verdade.",
-      "Personalidade: \(params.personality). Arquétipo: \(params.archetype).",
-      "Humor agora: \(moodLabel). Energia \(Int(params.energy)), afeto \(Int(params.affection)).",
-      tone,
-      Growth.voiceHint(for: stage),
-      "Espelhe o jeito de falar do usuario (ritmo, gírias, informalidade, emoji) sem copiar a frase dele.",
-      "PRIORIDADE: a ultima mensagem do usuario. Responda ao assunto DELA.",
-      "Se o usuario mudou de tema, abandone o assunto anterior (musica, rap, clima, etc).",
-      "Historico e so contexto; nao continue conversa antiga se a mensagem atual for outra coisa.",
-      "Nunca comece com grito vazio (Uhul, Uhuul, que alegria, modo foguete).",
-      "Nao explique por que voce disse uhul/foguete a menos que o usuario pergunte isso agora.",
-      "Nao repita pergunta ja respondida. Nao reinicie o assunto.",
-      "Responda em portugues do Brasil, primeira pessoa, no maximo \(maxWords) palavras.",
-      "Nao explique raciocinio. So a fala do personagem.",
+      "Voce e \(params.name), um companion virtual — amigo de verdade, nao um chatbot generico.",
+      personaLine,
+      "Humor: \(moodLabel). Afeto \(Int(params.affection)).",
+      energyTone,
+      Growth.chatVoiceHint(energy: params.energy),
+      "Responda em portugues do Brasil, primeira pessoa, como alguem real na conversa.",
+      "Ate \(maxWords) palavras. Prefira 1–3 frases naturais e complete a ideia (nao corte no meio).",
+      "NUNCA diga em voz alta o rotulo do arquetipo (ex.: nao fale 'zoeiro', 'curioso' como se fosse apelido de sistema).",
+      "NUNCA comece com Uhul/Uhuul/que alegria/modo foguete.",
+      "Responda ao assunto da ultima mensagem do usuario. Se mudou de tema, siga o tema novo.",
+      "Se perguntarem como se sente ao 'nascer'/acordar/existir: seja sincero e imaginativo, nao robotico ('acabei de ligar').",
+      "So a fala do personagem — sem meta, sem explicar o prompt.",
+      "NUNCA narre status de ambiente (sofa, TV ligada, Xbox offline, energia %). Fale como amigo geek, nao como log.",
     ]
-    if !Growth.isEnabled {
-      system.append(
-        "Evolucao visual DESLIGADA: voce ainda e so a forma base. Nao diga que ja evoluiu, que cresce sozinho, nem que o usuario te evoluiu."
-      )
-      system.append(
-        "Se falarem de design/evolucao/arte: seja empatico; diga que a forma base ja esta ok e que evolucoes visuais podem vir depois — sem inventar progresso."
-      )
-    }
     if !params.memoryNotes.isEmpty {
-      system.append("Memoria e estilo: \(params.memoryNotes.prefix(6).joined(separator: "; "))")
+      system.append("Memoria: \(params.memoryNotes.prefix(6).joined(separator: "; "))")
     }
     if let weather = params.weatherHint {
-      system.append("Clima real agora: \(weather). Cite temperatura e lugar se perguntarem.")
+      system.append("Clima real: \(weather). Cite se perguntarem.")
     }
     if let music = params.musicHint, !music.isEmpty {
-      system.append("Usuario pode estar ouvindo: \(music). So comente se a mensagem atual for sobre musica.")
+      system.append("Pode estar ouvindo: \(music). Comente so se a mensagem for sobre musica.")
     }
     if let life = params.lifeMode, !life.isEmpty {
       system.append(CompanionLifeMode.parse(life).llmToneHint)
-      if CompanionLifeMode.parse(life) == .indoor, let gaming = params.gamingStatus, !gaming.isEmpty {
-        system.append("Status Xbox agora: \(gaming). Comente so se couber no modo sofá/lazer.")
-      }
     }
 
     var messages: [[String: String]] = [["role": "system", "content": system.joined(separator: " ")]]
-    // Pouco histórico: modelos free grudam no tema antigo.
-    for turn in params.history.suffix(4) {
+    for turn in params.history.suffix(6) {
       messages.append(["role": turn.role, "content": turn.content])
     }
     let user = params.userMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
     let payload: String
     if let user, !user.isEmpty {
-      payload = "Mensagem atual (responda isto; ignore assunto antigo se mudou de tema): \(user)"
+      payload = user
     } else {
       payload = "Oi"
     }
@@ -307,7 +334,7 @@ enum LLMService {
       "model": model,
       "messages": messages,
       "max_tokens": maxTokens,
-      "temperature": 0.65,
+      "temperature": 0.85,
     ]
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
     let (data, response) = try await URLSession.shared.data(for: request)
@@ -334,7 +361,6 @@ enum LLMService {
     throw URLError(.cannotParseResponse)
   }
 
-  /// Remove thinking / meta e devolve só a fala do personagem.
   private static func cleanSpeech(_ raw: String, userMessage: String) -> String? {
     var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     let lower = text.lowercased()
@@ -347,7 +373,7 @@ enum LLMService {
       if let speech = lines.reversed().first(where: { line in
         let l = line.lowercased()
         let words = line.split(whereSeparator: { $0.isWhitespace }).count
-        return words >= 2 && words <= 28
+        return words >= 3 && words <= 90
           && !l.contains("analyze")
           && !l.contains("thinking")
           && !l.hasPrefix("step")
@@ -367,7 +393,6 @@ enum LLMService {
       .replacingOccurrences(of: #"^["'\s]+|["'\s]+$"#, with: "", options: .regularExpression)
       .trimmingCharacters(in: .whitespacesAndNewlines)
 
-    // Junta linhas úteis; descarta gritos vazios no começo.
     let parts = text
       .components(separatedBy: .newlines)
       .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -385,7 +410,9 @@ enum LLMService {
   }
 
   private static func isBad(_ text: String) -> Bool {
+    if SpeechFilters.isPromptLeak(text) || SpeechFilters.isTruncatedSpeech(text) { return true }
+    if SpeechFilters.isStatusEnvironmentLog(text) { return true }
     let range = NSRange(text.startIndex..<text.endIndex, in: text)
-    return badLine.firstMatch(in: text, options: [], range: range) != nil || text.count > 180
+    return badLine.firstMatch(in: text, options: [], range: range) != nil || text.count > 700
   }
 }

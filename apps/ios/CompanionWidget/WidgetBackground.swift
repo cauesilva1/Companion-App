@@ -1,4 +1,5 @@
 import SwiftUI
+import WidgetKit
 
 private struct SkyWidgetFill: View {
   let sky: SkyPeriod
@@ -29,6 +30,28 @@ extension View {
       }
     } else {
       self.background(SkyWidgetFill(sky: sky))
+    }
+  }
+
+  /// iOS 17+ aplica margem interna ~16pt — cancela pra usar o retângulo todo.
+  @ViewBuilder
+  func companionExpandIntoMargins() -> some View {
+    if #available(iOSApplicationExtension 17.0, *) {
+      self.padding(-16)
+    } else {
+      self
+    }
+  }
+
+  /// Fundo correto pra accessory (lock) — sem céu colorido.
+  @ViewBuilder
+  func companionAccessoryBackground() -> some View {
+    if #available(iOSApplicationExtension 17.0, *) {
+      self.containerBackground(for: .widget) {
+        AccessoryWidgetBackground()
+      }
+    } else {
+      self.background(AccessoryWidgetBackground())
     }
   }
 }

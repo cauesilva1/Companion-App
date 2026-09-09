@@ -9,6 +9,7 @@ struct CompanionApp: App {
   init() {
     // Spotify/Supabase no Keychain sobrevivem ao “Apagar App” — limpa na 1ª abertura.
     FreshInstall.resetKeychainIfReinstalled()
+    Growth.isEnabled = false
   }
 
   var body: some Scene {
@@ -18,14 +19,13 @@ struct CompanionApp: App {
   }
 }
 
-/// Encerra Live Activities órfãs — com Island congelada, limpa tudo ao ficar ativo.
+/// Launch leve — telemetria pesada fica no `scenePhase` / bootstrap (após a UI subir).
 final class CompanionAppDelegate: NSObject, UIApplicationDelegate {
   func applicationDidBecomeActive(_ application: UIApplication) {
     Task { @MainActor in
       if IslandTiming.animationFrozen {
         await LiveActivityController.endAll()
       }
-      await HealthKitStepsService.shared.refreshAndIngest()
     }
   }
 }

@@ -138,12 +138,40 @@ actor CompanionEngine {
         growthStageAt: now
       )
       file.companions = [created]
-      file.interactions = []
+      // Mantém histórico local de chat se já existir.
       CompanionLocalStore.save(file)
     }
     CompanionSnapshotStore.saveCompanionId(snap.id)
     CompanionSnapshotStore.save(snap)
     return snap
+  }
+
+  /// Grava turno de chat/ação no store local (histórico da tela Conversar).
+  func recordInteraction(
+    companionId: String,
+    type: InteractionType,
+    userMessage: String?,
+    reactionText: String,
+    energyAfter: Double,
+    affectionAfter: Double,
+    moodAfter: CompanionMood
+  ) {
+    let item = StoredInteraction(
+      id: CompanionLocalStore.nextId(prefix: "act"),
+      companionId: companionId,
+      type: type,
+      userMessage: userMessage,
+      reactionText: reactionText,
+      moodAfter: moodAfter,
+      energyAfter: energyAfter,
+      affectionAfter: affectionAfter,
+      createdAt: Date()
+    )
+    file.interactions.insert(item, at: 0)
+    if file.interactions.count > 80 {
+      file.interactions = Array(file.interactions.prefix(80))
+    }
+    CompanionLocalStore.save(file)
   }
 
   func interact(type: InteractionType, message: String? = nil) async -> (CompanionSnapshot, String) {

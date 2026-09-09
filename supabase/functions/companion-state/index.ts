@@ -14,10 +14,11 @@ Deno.serve(async (req) => {
   if (uErr || !userData.user) return json({ error: "unauthorized" }, 401);
 
   const sb = serviceClient();
+  const userId = userData.user.id;
   const { data: rows } = await sb
     .from("Companion")
     .select("*")
-    .eq("userId", userData.user.id)
+    .eq("userId", userId)
     .order("createdAt", { ascending: true })
     .limit(1);
   let row = rows?.[0];
@@ -30,26 +31,60 @@ Deno.serve(async (req) => {
     row = decayed ?? row;
   }
 
-  // Refresh Xbox presence when indoor (enriquece system prompt / widgets)
-  if (row.lifeMode === "indoor" && row.xboxGamertag) {
+  // Refresh Xbox when indoor (or gamertag set — status still useful)
+  if (row.xboxGamertag) {
     const xbox = await fetchXboxStatus(String(row.xboxGamertag));
     if (xbox && xbox.line !== row.gamingStatus) {
-      await sb
-        .from("Companion")
-        .update({ gamingStatus: xbox.line })
-        .eq("id", row.id);
-      row = { ...row, gamingStatus: xbox.line };
+      const { data: updated } = await sb.rpc("companion_set_gaming_status", {
+        p_user_id: userId,
+        p_gaming_status: xbox.line,
+      });
+      if (updated) row = updated;
+      else row = { ...row, gamingStatus: xbox.line };
+      // Feed row when indoor
+      if (row.lifeMode === "indoor") {
+        await sb.rpc("companion_append_thought", {
+          p_user_id: userId,
+          p_text: `Xbox: ${xbox.line}`,
+          p_kind: "gaming",
+          p_zone_name: null,
+        });
+      }
     }
   }
+
+  // Sync títulos + bundle de perfil/badges
+  await sb.rpc("companion_refresh_titles_for_user", { p_user_id: userId });
+  const { data: refreshed } = await sb
+    .from("Companion")
+    .select("*")
+    .eq("userId", userId)
+    .order("createdAt", { ascending: true })
+    .limit(1);
+  if (refreshed?.[0]) row = refreshed[0];
+
+  const { data: thoughts } = await sb.rpc("companion_list_thoughts", {
+    p_user_id: userId,
+    p_limit: 40,
+  });
+
+  const { data: profile } = await sb.rpc("companion_profile_stats", {
+    p_user_id: userId,
+  });
 
   return json({
     ok: true,
     companion: row,
+    thoughts: thoughts ?? [],
+    profile: profile ?? null,
     context: {
       lifeMode: row.lifeMode ?? "indoor",
       gamingStatus: row.gamingStatus ?? null,
       mediaHint: row.mediaHint ?? null,
       morningThought: row.morningThought ?? null,
+      activeTitle: row.activeTitle ?? null,
+      titleKey: row.titleKey ?? null,
+      equippedTitleKey: row.equippedTitleKey ?? null,
       decayFrozen: row.decayFrozen ?? false,
       presenceStatus: row.presenceStatus ?? "present",
     },

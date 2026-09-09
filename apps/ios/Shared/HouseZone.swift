@@ -17,6 +17,7 @@ struct HouseZone: Codable, Identifiable, Equatable, Sendable {
     HouseZone(id: "zone_bedroom", name: "Quarto", kind: "bedroom", ssidHint: nil, controllerId: nil, sortOrder: 1),
     HouseZone(id: "zone_desk", name: "Mesa", kind: "desk", ssidHint: nil, controllerId: nil, sortOrder: 2),
     HouseZone(id: "zone_kitchen", name: "Cozinha", kind: "kitchen", ssidHint: nil, controllerId: nil, sortOrder: 3),
+    HouseZone(id: "zone_away", name: "Na rua", kind: "outdoor", ssidHint: nil, controllerId: nil, sortOrder: 99),
   ]
 }
 
@@ -38,11 +39,20 @@ enum HouseZoneStore {
   }()
 
   static func ensureSeeded() {
-    if loadZones().isEmpty {
+    var zones = loadZones()
+    if zones.isEmpty {
       saveZones(HouseZone.defaults)
       if activeZoneId() == nil {
         setActiveZoneId(HouseZone.defaults.first?.id)
       }
+      return
+    }
+    // Migração: garante zona "away" em installs antigos
+    if !zones.contains(where: { $0.id == "zone_away" }) {
+      zones.append(
+        HouseZone(id: "zone_away", name: "Na rua", kind: "outdoor", ssidHint: nil, controllerId: nil, sortOrder: 99)
+      )
+      saveZones(zones)
     }
   }
 
@@ -78,7 +88,8 @@ enum HouseZoneStore {
     return zones.first
   }
 
-  /// Resolve zona ativa a partir de dicas futuras (SSID / device).
+  /// Resolve zona ativa a partir de dicas (SSID) e do lifeMode.
+  /// Fora de casa / sleep: não mostra "Sala do Sofá".
   static func resolveActiveZone(ssid: String? = nil, controllerId: String? = nil) -> HouseZone? {
     ensureSeeded()
     let zones = loadZones()
@@ -91,5 +102,31 @@ enum HouseZoneStore {
       return hit
     }
     return activeZone()
+  }
+
+  /// Alinha zona com o lifeMode cloud (evita "Sala do Sofá" + "Trabalho / rua").
+  static func syncWithLifeMode(_ mode: CompanionLifeMode) {
+    ensureSeeded()
+    switch mode {
+    case .indoor:
+      if activeZoneId() == "zone_away" || activeZoneId() == nil {
+        setActiveZoneId("zone_living")
+      }
+    case .work, .sleep:
+      setActiveZoneId("zone_away")
+    }
+  }
+
+  /// Rótulo curto para o hero: prioriza lifeMode; zona só em indoor.
+  static func locationLabel(lifeMode: CompanionLifeMode) -> String {
+    syncWithLifeMode(lifeMode)
+    switch lifeMode {
+    case .work:
+      return "Na rua"
+    case .sleep:
+      return "Sonhando"
+    case .indoor:
+      return activeZone()?.name ?? "Em casa"
+    }
   }
 }

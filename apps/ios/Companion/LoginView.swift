@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct LoginView: View {
   @ObservedObject var model: CompanionViewModel
@@ -21,8 +24,8 @@ struct LoginView: View {
                 .foregroundStyle(CompanionTheme.title)
               Text(
                 isRegister
-                  ? "Assim \(model.snapshot.name) fica salvo online — não só neste iPhone."
-                  : "Mesmo email no iPhone e no Mac → mesmo companion."
+                  ? "Crie sua conta para guardar o companion na nuvem (iPhone e Mac)."
+                  : "Entre com o email da conta. Se já tiver companion, ele volta do jeito que estava."
               )
                 .font(.subheadline)
                 .foregroundStyle(CompanionTheme.subtitle)
@@ -51,6 +54,7 @@ struct LoginView: View {
                   .foregroundStyle(.red)
               }
               Button {
+                Self.dismissKeyboard()
                 Task { await submit() }
               } label: {
                 Text(busy ? "…" : (isRegister ? "Criar conta" : "Entrar"))
@@ -74,13 +78,31 @@ struct LoginView: View {
         }
         .padding(18)
       }
+      .scrollDismissesKeyboard(.interactively)
     }
     .preferredColorScheme(.light)
     .navigationTitle("Conta")
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItemGroup(placement: .keyboard) {
+        Spacer()
+        Button("OK") { Self.dismissKeyboard() }
+      }
+    }
     .onAppear {
       if startInRegister { isRegister = true }
     }
+  }
+
+  private static func dismissKeyboard() {
+    #if canImport(UIKit)
+    UIApplication.shared.sendAction(
+      #selector(UIResponder.resignFirstResponder),
+      to: nil,
+      from: nil,
+      for: nil
+    )
+    #endif
   }
 
   private func submit() async {
@@ -88,13 +110,23 @@ struct LoginView: View {
     errorText = nil
     defer { busy = false }
     let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let registerMode = isRegister
+    let passwordCopy = password
     do {
-      try await withTimeout(seconds: 25) {
-        if self.isRegister {
-          try await self.model.register(email: trimmedEmail, password: self.password)
-        } else {
-          try await self.model.login(email: trimmedEmail, password: self.password)
+      try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask { @MainActor in
+          if registerMode {
+            try await model.register(email: trimmedEmail, password: passwordCopy)
+          } else {
+            try await model.login(email: trimmedEmail, password: passwordCopy)
+          }
         }
+        group.addTask {
+          try await Task.sleep(nanoseconds: 25_000_000_000)
+          throw TimeoutError()
+        }
+        try await group.next()
+        group.cancelAll()
       }
       model.preferRegisterOnLogin = false
     } catch is TimeoutError {
@@ -106,19 +138,3 @@ struct LoginView: View {
 }
 
 private struct TimeoutError: Error {}
-
-private func withTimeout<T: Sendable>(
-  seconds: Double,
-  operation: @escaping @Sendable () async throws -> T
-) async throws -> T {
-  try await withThrowingTaskGroup(of: T.self) { group in
-    group.addTask { try await operation() }
-    group.addTask {
-      try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-      throw TimeoutError()
-    }
-    guard let result = try await group.next() else { throw TimeoutError() }
-    group.cancelAll()
-    return result
-  }
-}

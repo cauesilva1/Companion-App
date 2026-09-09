@@ -45,6 +45,10 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
   var gamingStatus: String?
   var mediaHint: String?
   var morningThought: String?
+  /// Título de convivência (ex.: Rei do Sofá).
+  var activeTitle: String?
+  var titleKey: String?
+  var equippedTitleKey: String?
 
   static let demo = CompanionSnapshot(
     id: "demo",
@@ -63,7 +67,10 @@ struct CompanionSnapshot: Codable, Equatable, Sendable {
     lifeMode: "indoor",
     gamingStatus: nil,
     mediaHint: nil,
-    morningThought: nil
+    morningThought: nil,
+    activeTitle: "Recém-chegado",
+    titleKey: "newcomer",
+    equippedTitleKey: "newcomer"
   )
 
   /// Placeholder de UI — nunca sincronizar / nunca preferir sobre pet real.
