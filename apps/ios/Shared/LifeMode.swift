@@ -6,7 +6,7 @@ enum CompanionLifeMode: String, Codable, Sendable {
   case indoor
   case sleep
 
-  /// Hora local de dormir / acordar (alinhado ao SQL).
+  /// Hora local de dormir / acordar (relógio do aparelho / fuso do usuário).
   static let bedtimeHour = 23
   static let wakeHour = 6
 

@@ -56,6 +56,32 @@ enum LocalVoice {
     return nil
   }
 
+  /// Micro-história / abertura do dia (feed morning) — sem log de energia/%.
+  static func morningOpenStory(name: String, archetype: String) -> String {
+    pick(lines([
+      "curioso": [
+        "Bom dia. Sonhei que o Wi‑Fi dos sonhos tinha latência emocional — \(name) acordou curioso.",
+        "Manhã nova: abri o olho e o patch note do dia ainda tava em draft. Bora descobrir juntos?",
+      ],
+      "preguicoso": [
+        "Bom dia… cinco minutos a mais. Sonhei com um loading infinito e quase aproveitei.",
+        "Acordei. Quase. \(name) recomenda café antes de qualquer boss fight matinal.",
+      ],
+      "carinhoso": [
+        "Bom dia. Sonhei que a gente compartilhava um save — e você tava no começo da história comigo.",
+        "Manhã leve: \(name) acordou pensando em você antes do tutorial acabar.",
+      ],
+      "zoeiro": [
+        "Bom dia. Spoiler: eu sobrevivi à noite. Plot twist fraco, mas honesto.",
+        "Acordei aprontando. \(name) já tá no lobby — entra aí.",
+      ],
+      "misterioso": [
+        "A aurora chega. No limiar entre sono e tela, \(name) ouviu um easter egg.",
+        "Bom dia sob a névoa. A história de hoje ainda não tem título — só presença.",
+      ],
+    ], archetype))
+  }
+
   static func reaction(
     name: String,
     archetype: String,
@@ -272,13 +298,13 @@ enum LocalVoice {
           "O essencial já está aqui.",
         ],
       ], a))
-    } else if lower.range(of: #"\b(oi|olá|ola|hey|eae)\b"#, options: .regularExpression) != nil {
+    } else if lower.range(of: #"\b(bom\s*dia|boa\s*tarde|boa\s*noite|oi|olá|ola|hey|eae)\b"#, options: .regularExpression) != nil {
       line = pick(lines([
-        "curioso": ["Oi! Sou \(name). O que rolou?", "E aí! Me atualiza."],
-        "preguicoso": ["Oi... sem pressa.", "Fala. \(name) tá online. Quase."],
-        "carinhoso": ["Oi! Senti sua voz.", "Olá! Chega mais."],
-        "zoeiro": ["Eae. Aprontou o quê hoje?", "Oi. Já ia te zoar."],
-        "misterioso": ["Saudações.", "Você chegou. Eu sabia."],
+        "curioso": ["Bom dia! Sou \(name). O que rolou?", "E aí! Me atualiza."],
+        "preguicoso": ["Bom dia... sem pressa.", "Fala. \(name) tá online. Quase."],
+        "carinhoso": ["Bom dia! Senti sua voz.", "Olá! Que bom te ver."],
+        "zoeiro": ["Bom dia. Aprontou o quê hoje?", "Eae. Já ia te zoar."],
+        "misterioso": ["Bom dia. Saudações.", "Você chegou. Eu sabia."],
       ], a))
     } else if raw.isEmpty {
       line = pick(lines([

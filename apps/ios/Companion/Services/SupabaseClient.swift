@@ -90,6 +90,16 @@ enum SupabaseError: LocalizedError {
   }
 }
 
+/// Decide se falha de refresh/assert deve limpar tokens (logout).
+/// Rede/5xx/timeout → manter; 401 / sessionExpired → limpar.
+enum SessionAuthPolicy {
+  static func shouldClearTokens(for error: Error) -> Bool {
+    if case SupabaseError.sessionExpired = error { return true }
+    if case SupabaseError.http(let code, _) = error, code == 401 { return true }
+    return false
+  }
+}
+
 actor SupabaseClient {
   static let shared = SupabaseClient()
   private let sessionKey = "companion.supabase.session.v1"
@@ -163,19 +173,13 @@ actor SupabaseClient {
   private var lastUserAssertAt: TimeInterval = 0
   private var lastUserAssertId: String = ""
 
-  private func isAuthFailure(_ error: Error) -> Bool {
-    if case SupabaseError.sessionExpired = error { return true }
-    if case SupabaseError.http(let code, _) = error, code == 401 { return true }
-    return false
-  }
-
   func validSession() async -> SupabaseSession? {
     guard var session = loadSession() else { return nil }
     if session.isExpiredOrNear {
       do {
         session = try await refreshSession(session)
       } catch {
-        if isAuthFailure(error) {
+        if SessionAuthPolicy.shouldClearTokens(for: error) {
           saveSession(nil)
           return nil
         }
@@ -194,7 +198,7 @@ actor SupabaseClient {
       lastUserAssertId = session.userId
       return session
     } catch {
-      if isAuthFailure(error) {
+      if SessionAuthPolicy.shouldClearTokens(for: error) {
         saveSession(nil)
         lastUserAssertAt = 0
         lastUserAssertId = ""
@@ -443,6 +447,8 @@ actor SupabaseClient {
     var titleKey: String?
     var equippedTitleKey: String?
     var unlockedTitles: [String]?
+    var weatherCondition: String?
+    var weatherTempC: Int?
     /// Presente após quiz v3; ausência = precisa refazer o questionário.
     var traits: TraitsPayload?
 
@@ -474,7 +480,7 @@ actor SupabaseClient {
     )
     let rows = try JSONDecoder().decode([RemoteCompanion].self, from: data)
     guard let row = rows.first else { return nil }
-    return (snapshot(from: row), row.hasQuizTraits)
+    return (Self.snapshot(from: row), row.hasQuizTraits)
   }
 
   /// Apaga todos os companions do usuário autenticado (quiz de novo / sair da conta).
@@ -494,6 +500,49 @@ actor SupabaseClient {
     var profile: ProfileStatsDTO?
   }
 
+  struct CloudStateContextPayload: Codable, Sendable {
+    var lifeMode: String?
+    var gamingStatus: String?
+    var mediaHint: String?
+    var morningThought: String?
+    var activeTitle: String?
+    var titleKey: String?
+    var equippedTitleKey: String?
+    var weatherCondition: String?
+    var weatherTempC: Int?
+    var weatherAt: String?
+  }
+
+  struct CloudStateEnvelope: Codable, Sendable {
+    var ok: Bool?
+    var companion: RemoteCompanion?
+    var context: CloudStateContextPayload?
+    var thoughts: [CloudThoughtDTO]?
+    var profile: ProfileStatsDTO?
+  }
+
+  /// Decode puro do JSON companion-state (sem rede / sem side effects em stores).
+  static func makeCloudStateBundle(from data: Data) -> CloudStateBundle? {
+    guard let env = try? JSONDecoder().decode(CloudStateEnvelope.self, from: data),
+          let row = env.companion else { return nil }
+    var snap = Self.snapshot(from: row)
+    Self.applyContext(&snap, context: env.context)
+    return CloudStateBundle(snapshot: snap, profile: env.profile)
+  }
+
+  static func applyContext(_ snap: inout CompanionSnapshot, context: CloudStateContextPayload?) {
+    guard let ctx = context else { return }
+    if let m = ctx.lifeMode { snap.lifeMode = m }
+    if let g = ctx.gamingStatus { snap.gamingStatus = g }
+    if let media = ctx.mediaHint { snap.mediaHint = media }
+    if let morning = ctx.morningThought { snap.morningThought = morning }
+    if let title = ctx.activeTitle { snap.activeTitle = title }
+    if let tk = ctx.titleKey { snap.titleKey = tk }
+    if let ek = ctx.equippedTitleKey { snap.equippedTitleKey = ek }
+    if let wx = ctx.weatherCondition { snap.weatherCondition = wx }
+    if let temp = ctx.weatherTempC { snap.weatherTempC = temp }
+  }
+
   /// Cloud-First: lê estado pós-decay via Edge Function (+ profile/badges se presente).
   func fetchCloudState() async throws -> CloudStateBundle? {
     let session = try await requireSession()
@@ -502,33 +551,9 @@ actor SupabaseClient {
       method: "GET",
       token: session.accessToken
     )
-    struct Envelope: Codable {
-      var ok: Bool?
-      var companion: RemoteCompanion?
-      var context: ContextPayload?
-      var thoughts: [CloudThoughtDTO]?
-      var profile: ProfileStatsDTO?
-    }
-    struct ContextPayload: Codable {
-      var lifeMode: String?
-      var gamingStatus: String?
-      var mediaHint: String?
-      var morningThought: String?
-      var activeTitle: String?
-      var titleKey: String?
-      var equippedTitleKey: String?
-    }
-    if let env = try? JSONDecoder().decode(Envelope.self, from: data), let row = env.companion {
-      var snap = snapshot(from: row)
-      if let ctx = env.context {
-        if let m = ctx.lifeMode { snap.lifeMode = m }
-        if let g = ctx.gamingStatus { snap.gamingStatus = g }
-        if let media = ctx.mediaHint { snap.mediaHint = media }
-        if let morning = ctx.morningThought { snap.morningThought = morning }
-        if let title = ctx.activeTitle { snap.activeTitle = title }
-        if let tk = ctx.titleKey { snap.titleKey = tk }
-        if let ek = ctx.equippedTitleKey { snap.equippedTitleKey = ek }
-      }
+    if let env = try? JSONDecoder().decode(CloudStateEnvelope.self, from: data), let row = env.companion {
+      var snap = Self.snapshot(from: row)
+      Self.applyContext(&snap, context: env.context)
       if let morning = snap.morningThought, !morning.isEmpty {
         LifeModeStore.pendingMorningThought = morning
       }
@@ -581,6 +606,8 @@ actor SupabaseClient {
     var activeTitle: String?
     var titleKey: String?
     var equippedTitleKey: String?
+    var weatherCondition: String?
+    var weatherTempC: Int?
     var thoughts: [CloudThoughtDTO]?
   }
 
@@ -597,7 +624,12 @@ actor SupabaseClient {
     homeWifiSsid: String?,
     xboxGamertag: String?,
     ackMorning: Bool = false,
-    appForeground: Bool = false
+    appForeground: Bool = false,
+    timezone: String? = TimeZone.current.identifier,
+    latitude: Double? = nil,
+    longitude: Double? = nil,
+    weatherCondition: String? = nil,
+    weatherTempC: Int? = nil
   ) async throws -> ContextIngestResult {
     let session = try await requireSession()
     var body: [String: Any] = [
@@ -613,6 +645,11 @@ actor SupabaseClient {
     if let mediaHint { body["mediaHint"] = mediaHint }
     if let homeWifiSsid { body["homeWifiSsid"] = homeWifiSsid }
     if let xboxGamertag { body["xboxGamertag"] = xboxGamertag }
+    if let timezone, !timezone.isEmpty { body["timezone"] = timezone }
+    if let latitude { body["latitude"] = latitude }
+    if let longitude { body["longitude"] = longitude }
+    if let weatherCondition { body["weatherCondition"] = weatherCondition }
+    if let weatherTempC { body["weatherTempC"] = weatherTempC }
     if ackMorning { body["ackMorning"] = true }
     let data = try await request(
       path: "/functions/v1/context-ingest",
@@ -717,7 +754,7 @@ actor SupabaseClient {
       prefer: "return=representation"
     )
     if let rows = try? JSONDecoder().decode([RemoteCompanion].self, from: data), let row = rows.first {
-      return snapshot(from: row)
+      return Self.snapshot(from: row)
     }
     return CompanionSnapshot(
       id: id,
@@ -795,7 +832,7 @@ actor SupabaseClient {
       prefer: "return=representation"
     )
     if let rows = try? JSONDecoder().decode([RemoteCompanion].self, from: data), let row = rows.first {
-      return snapshot(from: row)
+      return Self.snapshot(from: row)
     }
     var out = snap
     out.id = id
@@ -853,11 +890,11 @@ actor SupabaseClient {
       token: session.accessToken
     )
     if let row = try? JSONDecoder().decode(RemoteCompanion.self, from: data) {
-      return snapshot(from: row)
+      return Self.snapshot(from: row)
     }
     // PostgREST may return array
     if let rows = try? JSONDecoder().decode([RemoteCompanion].self, from: data), let row = rows.first {
-      return snapshot(from: row)
+      return Self.snapshot(from: row)
     }
     if let cloud = try await fetchCloudState() {
       return cloud.snapshot
@@ -986,7 +1023,7 @@ actor SupabaseClient {
     return merged
   }
 
-  private func snapshot(from row: RemoteCompanion) -> CompanionSnapshot {
+  static func snapshot(from row: RemoteCompanion) -> CompanionSnapshot {
     CompanionSnapshot(
       id: row.id,
       name: row.name,
@@ -1007,7 +1044,9 @@ actor SupabaseClient {
       morningThought: row.morningThought,
       activeTitle: row.activeTitle,
       titleKey: row.titleKey ?? row.equippedTitleKey,
-      equippedTitleKey: row.equippedTitleKey ?? row.titleKey
+      equippedTitleKey: row.equippedTitleKey ?? row.titleKey,
+      weatherCondition: row.weatherCondition,
+      weatherTempC: row.weatherTempC
     )
   }
 
@@ -1023,6 +1062,7 @@ actor SupabaseClient {
     var unit: String?
     var hint: String?
     var rarity: Int?
+    var secret: Bool?
 
     var id: String { key }
   }

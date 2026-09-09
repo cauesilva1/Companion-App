@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum SkyPeriod: String {
-  case dawn, day, evening, night, storm
+  case dawn, day, evening, night, storm, cloudy, snowy
 
   static func current(date: Date = Date()) -> SkyPeriod {
     let hour = Calendar.current.component(.hour, from: date)
@@ -11,6 +11,39 @@ enum SkyPeriod: String {
     case 17..<20: return .evening
     default: return .night
     }
+  }
+
+  /// Mapeia condição canônica da cloud + hora local → plate de céu.
+  static func from(weather: String?, hour: Int = Calendar.current.component(.hour, from: Date())) -> SkyPeriod {
+    switch (weather ?? "").lowercased() {
+    case "rainy": return .storm
+    case "snowy": return .snowy
+    case "cloudy": return .cloudy
+    case "night": return .night
+    case "sunny":
+      switch hour {
+      case 5..<8: return .dawn
+      case 8..<17: return .day
+      case 17..<20: return .evening
+      default: return .night
+      }
+    default:
+      return .current(date: Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) ?? Date())
+    }
+  }
+
+  /// Resolução compartilhada. Preferência: weather → plate salvo → hora.
+  static func resolved(snapshotWeather: String? = nil) -> SkyPeriod {
+    if let w = snapshotWeather?.trimmingCharacters(in: .whitespacesAndNewlines), !w.isEmpty {
+      return from(weather: w)
+    }
+    if let w = CompanionSnapshotStore.loadWeatherCondition() {
+      return from(weather: w)
+    }
+    if let sky = CompanionSnapshotStore.loadSkyPeriod() {
+      return sky
+    }
+    return .current()
   }
 
   var imageName: String { rawValue }
@@ -39,9 +72,28 @@ enum SkyPeriod: String {
       )
     case .storm:
       return LinearGradient(
-        colors: [Color(red: 0.40, green: 0.45, blue: 0.52), Color(red: 0.75, green: 0.80, blue: 0.88)],
+        colors: [Color(red: 0.38, green: 0.42, blue: 0.50), Color(red: 0.62, green: 0.68, blue: 0.76)],
         startPoint: .top, endPoint: .bottom
       )
+    case .cloudy:
+      return LinearGradient(
+        colors: [Color(red: 0.62, green: 0.70, blue: 0.80), Color(red: 0.88, green: 0.91, blue: 0.95)],
+        startPoint: .top, endPoint: .bottom
+      )
+    case .snowy:
+      return LinearGradient(
+        colors: [Color(red: 0.72, green: 0.84, blue: 0.95), Color(red: 0.92, green: 0.96, blue: 1.0)],
+        startPoint: .top, endPoint: .bottom
+      )
+    }
+  }
+
+  /// Opacidade da arte — chuva/neve um pouco mais visíveis.
+  var preferredArtOpacity: Double {
+    switch self {
+    case .storm, .snowy: return 0.42
+    case .cloudy, .night: return 0.34
+    default: return 0.30
     }
   }
 
@@ -51,36 +103,44 @@ enum SkyPeriod: String {
   }
 }
 
-/// Céu legível atrás da UI: gradiente + imagem suave e clipada (sem “faixas” do PNG por cima dos cards).
+/// Céu full-bleed: plate em tela cheia + véu suave (sem faixa dura no meio).
 struct SkyBackground: View {
   var period: SkyPeriod = .current()
-  /// Opacidade da arte — baixa no app para não apagar textos.
-  var artOpacity: Double = 0.28
+  /// Se nil, usa `period.preferredArtOpacity`.
+  var artOpacity: Double? = nil
+
+  private var resolvedArtOpacity: Double {
+    artOpacity ?? period.preferredArtOpacity
+  }
 
   var body: some View {
     GeometryReader { geo in
-      ZStack(alignment: .top) {
+      ZStack {
         period.gradient
+
         Image(period.imageName)
           .resizable()
           .scaledToFill()
-          .frame(width: geo.size.width, height: geo.size.height * 0.55, alignment: .top)
+          .frame(width: geo.size.width, height: geo.size.height)
           .clipped()
-          .opacity(artOpacity)
+          .opacity(resolvedArtOpacity)
           .allowsHitTesting(false)
-        // Véu claro na metade inferior para cards/texto sempre contrastarem
-        VStack(spacing: 0) {
-          Spacer()
-          LinearGradient(
-            colors: [Color.white.opacity(0), Color.white.opacity(0.72), Color(red: 0.95, green: 0.97, blue: 1.0).opacity(0.92)],
-            startPoint: .top,
-            endPoint: .bottom
-          )
-          .frame(height: geo.size.height * 0.55)
-        }
+
+        // Véu contínuo do topo (transparente) ao rodapé (mais sólido) — sem corte em 55%.
+        LinearGradient(
+          colors: [
+            Color.white.opacity(0.05),
+            Color.white.opacity(0.18),
+            Color(red: 0.95, green: 0.97, blue: 1.0).opacity(0.55),
+            Color(red: 0.94, green: 0.96, blue: 0.99).opacity(0.82),
+          ],
+          startPoint: .top,
+          endPoint: .bottom
+        )
         .allowsHitTesting(false)
       }
     }
     .ignoresSafeArea()
+    .animation(.easeInOut(duration: 1.0), value: period)
   }
 }

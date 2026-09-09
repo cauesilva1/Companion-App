@@ -144,8 +144,24 @@ enum LLMService {
     }
 
     let messages = buildMessages(working)
-    if let text = await bestProviderReply(messages: messages, userMessage: msg),
-       SpeechFilters.acceptReply(text, user: msg) {
+
+    // Saudações curtas: responde na hora (LLM free demora demais / trava o fio).
+    if isQuickGreeting(msg) {
+      return LocalVoice.anchoredChat(
+        name: params.name,
+        archetype: params.archetype,
+        userMessage: params.userMessage,
+        growthStage: params.growthStage,
+        energy: Int(params.energy.rounded())
+      )
+    }
+
+    // LLM com teto curto; se estourar, cai no local (evita “digitando…” por minutos).
+    if let text = await bestProviderReply(
+      messages: messages,
+      userMessage: msg,
+      deadlineSeconds: 5
+    ), SpeechFilters.acceptReply(text, user: msg) {
       if msg.count >= 12 { cache[cacheKey] = (text, Date()) }
       return text
     }
@@ -159,12 +175,51 @@ enum LLMService {
     )
   }
 
+  private static func isQuickGreeting(_ msg: String) -> Bool {
+    msg.range(
+      of: #"^(bom\s*dia|boa\s*tarde|boa\s*noite|oi|olá|ola|hey|eae)[\s!.?…]*$"#,
+      options: [.regularExpression, .caseInsensitive]
+    ) != nil
+  }
+
   /// Tenta provedores em ordem (qualidade), não “primeiro fraco ganha”.
-  private static func bestProviderReply(messages: [[String: String]], userMessage: String) async -> String? {
+  private static func bestProviderReply(
+    messages: [[String: String]],
+    userMessage: String,
+    deadlineSeconds: TimeInterval = 14
+  ) async -> String? {
+    await withTaskGroup(of: String?.self) { group in
+      group.addTask {
+        await Self.bestProviderReplyUncapped(messages: messages, userMessage: userMessage)
+      }
+      group.addTask {
+        let ns = UInt64(max(1, deadlineSeconds) * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: ns)
+        return nil
+      }
+      var hit: String?
+      for await value in group {
+        if let value {
+          hit = value
+          group.cancelAll()
+          break
+        }
+        // timeout branch returned nil first → cancel LLM
+        if hit == nil {
+          group.cancelAll()
+          break
+        }
+      }
+      return hit
+    }
+  }
+
+  private static func bestProviderReplyUncapped(messages: [[String: String]], userMessage: String) async -> String? {
     var candidates: [(model: String, text: String)] = []
 
     if let key = KeychainStore.get(.nvidia) {
       for model in nvidiaModels {
+        if Task.isCancelled { return nil }
         if let raw = try? await callChat(
           url: nvidiaURL,
           apiKey: key,
@@ -186,6 +241,7 @@ enum LLMService {
         "X-Title": "Companion iOS",
       ]
       for model in openrouterModels {
+        if Task.isCancelled { return nil }
         if let raw = try? await callChat(
           url: openrouterURL,
           apiKey: key,
@@ -206,7 +262,7 @@ enum LLMService {
 
   /// Compat: musicComment ainda chama raceProviders.
   private static func raceProviders(messages: [[String: String]], userMessage: String) async -> String? {
-    await bestProviderReply(messages: messages, userMessage: userMessage)
+    await bestProviderReply(messages: messages, userMessage: userMessage, deadlineSeconds: 8)
   }
 
   private static func scoreReply(_ text: String, user: String) -> Int {

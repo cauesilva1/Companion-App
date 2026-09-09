@@ -102,6 +102,17 @@ model Companion {
   /// Pensamento guardado na hibernação para a 1ª abertura do dia.
   morningThought    String?
   morningThoughtDayKey String?
+  /// IANA timezone do usuário (ex.: America/Toronto) — sono/dia local.
+  timezone          String?
+  /// sunny | rainy | snowy | cloudy | night — Open-Meteo + hora local.
+  weatherCondition  String?
+  weatherTempC      Int?
+  weatherAt         DateTime?
+  /// Últimas coords conhecidas (GPS iPhone; fallback Toronto na Edge).
+  lat               Float?
+  lon               Float?
+  /// Flags de easter eggs (sawSnow, midnightOpen, stormChatAt…).
+  secretFlags       Json       @default("{}")
   /// Título ativo de convivência (ex.: "Rei do Sofá").
   activeTitle       String?
   titleKey          String?

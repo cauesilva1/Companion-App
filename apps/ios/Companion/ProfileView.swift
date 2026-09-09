@@ -124,28 +124,47 @@ struct ProfileView: View {
   private func badgeRow(_ badge: SupabaseClient.BadgeDTO) -> some View {
     let unlocked = badge.unlocked == true
     let equipped = badge.equipped == true
+    let isSecret = badge.secret == true
     let progress = badge.progress ?? 0
     let target = max(badge.target ?? 1, 0.0001)
     let ratio = min(1, max(0, progress / target))
+    let lockedSecret = isSecret && !unlocked
 
     return Button {
       guard unlocked else { return }
       Task { await equip(badge) }
     } label: {
       HStack(alignment: .center, spacing: 12) {
-        Image(systemName: badge.symbol ?? "medal.fill")
+        Image(systemName: lockedSecret ? "questionmark.circle" : (badge.symbol ?? "medal.fill"))
           .font(.title3)
-          .foregroundStyle(unlocked ? CompanionTheme.play : Color.gray.opacity(0.45))
+          .foregroundStyle(
+            lockedSecret
+              ? Color.gray.opacity(0.35)
+              : (unlocked ? CompanionTheme.play : Color.gray.opacity(0.45))
+          )
           .frame(width: 36, height: 36)
+          .opacity(lockedSecret ? 0.55 : 1)
           .background(
-            Circle().fill(unlocked ? CompanionTheme.play.opacity(0.12) : Color.gray.opacity(0.08))
+            Circle().fill(
+              lockedSecret
+                ? Color.black.opacity(0.06)
+                : (unlocked ? CompanionTheme.play.opacity(0.12) : Color.gray.opacity(0.08))
+            )
           )
 
         VStack(alignment: .leading, spacing: 4) {
           HStack {
-            Text(badge.label ?? badge.key)
+            Text(lockedSecret ? "???" : (badge.label ?? badge.key))
               .font(.subheadline.weight(.bold))
               .foregroundStyle(unlocked ? CompanionTheme.title : Color.gray)
+            if unlocked && isSecret {
+              Text("Segredo revelado")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.indigo.opacity(0.85)))
+            }
             if equipped {
               Text("Equipado")
                 .font(.caption2.weight(.bold))
@@ -156,11 +175,15 @@ struct ProfileView: View {
             }
             Spacer(minLength: 0)
           }
-          Text(badge.description ?? "")
+          Text(lockedSecret ? "Algo está escondido aqui." : (badge.description ?? ""))
             .font(.caption2)
             .foregroundStyle(unlocked ? CompanionTheme.subtitle : Color.gray.opacity(0.7))
             .lineLimit(2)
-          if !unlocked {
+          if lockedSecret {
+            Text(badge.hint ?? "Condição misteriosa…")
+              .font(.caption2)
+              .foregroundStyle(Color.gray.opacity(0.8))
+          } else if !unlocked {
             ProgressView(value: ratio)
               .tint(Color.gray.opacity(0.5))
             Text(badge.hint ?? "")
@@ -178,8 +201,8 @@ struct ProfileView: View {
             .scaleEffect(0.8)
         }
       }
-      .padding(.vertical, 6)
-      .opacity(unlocked ? 1 : 0.85)
+      .padding(.vertical, 4)
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .disabled(!unlocked || equippingKey != nil)

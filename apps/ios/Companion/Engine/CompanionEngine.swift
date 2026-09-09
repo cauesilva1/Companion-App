@@ -19,7 +19,7 @@ actor CompanionEngine {
     file.companions = [created]
     CompanionLocalStore.save(file)
     CompanionSnapshotStore.saveCompanionId(created.id)
-    CompanionSnapshotStore.save(created.toSnapshot())
+    saveSharedSnapshot(created.toSnapshot())
     return created
   }
 
@@ -39,7 +39,7 @@ actor CompanionEngine {
       CompanionLocalStore.save(file)
       CompanionSnapshotStore.saveCompanionId(existing.id)
       let snap = existing.toSnapshot(moodText: draft.blurb)
-      CompanionSnapshotStore.save(snap)
+      saveSharedSnapshot(snap)
       CompanionQuiz.markCompleted()
       return snap
     }
@@ -69,7 +69,7 @@ actor CompanionEngine {
     CompanionLocalStore.save(file)
     CompanionSnapshotStore.saveCompanionId(created.id)
     let snap = created.toSnapshot(moodText: draft.blurb)
-    CompanionSnapshotStore.save(snap)
+    saveSharedSnapshot(snap)
     CompanionQuiz.markCompleted()
     return snap
   }
@@ -97,7 +97,7 @@ actor CompanionEngine {
     if let greeting {
       snap.moodText = "\(snap.moodText) · \(greeting)"
     }
-    CompanionSnapshotStore.save(snap)
+    saveSharedSnapshot(snap)
     return snap
   }
 
@@ -142,7 +142,7 @@ actor CompanionEngine {
       CompanionLocalStore.save(file)
     }
     CompanionSnapshotStore.saveCompanionId(snap.id)
-    CompanionSnapshotStore.save(snap)
+    saveSharedSnapshot(snap)
     return snap
   }
 
@@ -251,7 +251,7 @@ actor CompanionEngine {
     persist(companion)
 
     let snap = companion.toSnapshot()
-    CompanionSnapshotStore.save(snap)
+    saveSharedSnapshot(snap)
     return (snap, reaction)
   }
 
@@ -288,6 +288,11 @@ actor CompanionEngine {
       file.companions = [companion]
     }
     CompanionLocalStore.save(file)
+  }
+
+  private func saveSharedSnapshot(_ snapshot: CompanionSnapshot) {
+    CompanionSnapshotStore.save(snapshot)
+    WidgetReloader.reload()
   }
 
   private func chatHistory(companionId: String) -> [(role: String, content: String)] {

@@ -109,11 +109,20 @@ final class LocationHelper: NSObject, CLLocationManagerDelegate {
 }
 
 enum WeatherService {
+  /// Alinhado com cloud: sunny | rainy | snowy | cloudy | night
+  enum Condition: String, Sendable, Codable {
+    case sunny, rainy, snowy, cloudy, night
+  }
+
   struct Snapshot: Sendable {
     var city: String
     var region: String
     var tempC: Int
     var description: String
+    var condition: Condition
+    var latitude: Double
+    var longitude: Double
+    var weatherCode: Int
   }
 
   private static var cached: (Snapshot, Date)?
@@ -126,6 +135,17 @@ enum WeatherService {
     75: "neve forte", 80: "pancadas fracas", 81: "pancadas", 82: "pancadas fortes",
     95: "trovoada", 96: "trovoada com granizo", 99: "trovoada forte",
   ]
+
+  static func condition(fromWmo code: Int, hour: Int = Calendar.current.component(.hour, from: Date())) -> Condition {
+    if [71, 73, 75, 77, 85, 86].contains(code) { return .snowy }
+    if [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].contains(code) {
+      return .rainy
+    }
+    let isNight = hour < 6 || hour >= 20
+    if code == 0 || code == 1 { return isNight ? .night : .sunny }
+    if [2, 3, 45, 48].contains(code) { return isNight ? .night : .cloudy }
+    return isNight ? .night : .cloudy
+  }
 
   static func isWeatherQuestion(_ message: String) -> Bool {
     message.range(
@@ -160,14 +180,36 @@ enum WeatherService {
       region = placemark.administrativeArea ?? ""
     }
 
+    let hour = Calendar.current.component(.hour, from: Date())
     let snap = Snapshot(
       city: city,
       region: region,
       tempC: Int(temp.rounded()),
-      description: wmo[code] ?? "tempo indefinido"
+      description: wmo[code] ?? "tempo indefinido",
+      condition: condition(fromWmo: code, hour: hour),
+      latitude: lat,
+      longitude: lon,
+      weatherCode: code
     )
     cached = (snap, Date())
     return snap
+  }
+
+  /// GPS leve para ingest (sem exigir reverse geocode).
+  static func coordinatesIfAuthorized() async -> (lat: Double, lon: Double)? {
+    guard LocationHelper.shared.isWhenInUseAuthorized else { return nil }
+    do {
+      let loc = try await LocationHelper.shared.request()
+      return (loc.coordinate.latitude, loc.coordinate.longitude)
+    } catch {
+      return nil
+    }
+  }
+
+  /// Snapshot em cache ou nil (não bloqueia ingest).
+  static func cachedSnapshot() -> Snapshot? {
+    guard let cached, Date().timeIntervalSince(cached.1) < cacheTTL else { return nil }
+    return cached.0
   }
 
   private static func reverseGeocode(_ location: CLLocation) async throws -> CLPlacemark? {

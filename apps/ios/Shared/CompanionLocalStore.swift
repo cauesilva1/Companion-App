@@ -22,7 +22,9 @@ struct StoredCompanion: Codable, Equatable, Sendable {
   var growthStageAt: Date?
 
   func toSnapshot(moodText: String? = nil) -> CompanionSnapshot {
-    CompanionSnapshot(
+    let previous = CompanionSnapshotStore.load()
+    let sticky = previous?.id == id ? previous : nil
+    return CompanionSnapshot(
       id: id,
       name: name,
       mood: mood.rawValue,
@@ -34,15 +36,18 @@ struct StoredCompanion: Codable, Equatable, Sendable {
       updatedAt: Date(),
       growthStage: Growth.normalize(growthStage).rawValue,
       createdAt: createdAt ?? lastInteractionAt,
-      presenceStatus: nil,
-      decayFrozen: nil,
-      lifeMode: LifeModeStore.loadMode().rawValue,
-      gamingStatus: nil,
-      mediaHint: nil,
-      morningThought: nil,
-      activeTitle: nil,
-      titleKey: nil,
-      equippedTitleKey: nil
+      presenceStatus: sticky?.presenceStatus,
+      decayFrozen: sticky?.decayFrozen,
+      lifeMode: sticky?.lifeMode ?? LifeModeStore.loadMode().rawValue,
+      gamingStatus: sticky?.gamingStatus,
+      mediaHint: sticky?.mediaHint,
+      morningThought: sticky?.morningThought,
+      activeTitle: sticky?.activeTitle,
+      titleKey: sticky?.titleKey,
+      equippedTitleKey: sticky?.equippedTitleKey,
+      weatherCondition: sticky?.weatherCondition,
+      weatherTempC: sticky?.weatherTempC,
+      skyPeriodRaw: sticky?.skyPeriodRaw
     )
   }
 }

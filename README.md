@@ -1,22 +1,60 @@
-# Companion App
+# Companion
 
 <p align="center">
-  <img src="docs/preview/hero.png" alt="Companion App — dinos no céu" width="900" />
+  <img src="docs/preview/ios-widget-medium.jpg" alt="Widget Companion — Jaozinho no céu" width="720" />
 </p>
 
 <p align="center">
-  <strong>Um companion virtual estilo Tamagotchi para o desktop</strong><br/>
-  Popup pixel art que vive no canto da tela, reage a você,<br/>
-  escuta a música que está tocando e conversa com personalidade.
+  <strong>Um companion pixel art que vive no seu iPhone</strong><br/>
+  Personalidade, céu dinâmico, pensamentos no widget<br/>
+  e sobrevivência na nuvem — não só um chat.
 </p>
 
 <p align="center">
-  Cloud-First (Supabase) · iOS passivo · Electron legado
+  <code>iOS · Supabase · Widgets · Life Modes</code>
 </p>
 
-> **Arquitetura atual:** sobrevivência do dino (decay, missões, presença) vive no **Supabase**
-> (RPCs + Edge Functions + cron). Express/Electron estão em **modo manutenção** — ver
-> [`docs/CLOUD_FIRST.md`](docs/CLOUD_FIRST.md).
+---
+
+## O que é
+
+O Companion nasce de um quiz, ganha um dino e uma voz. No dia a dia ele:
+
+- recupera energia no sofá, gasta energia fora de casa
+- comenta a vida com pensamentos curtos (feed + widget)
+- muda o céu com a hora e o clima real
+- guarda convivência, títulos e badges no perfil
+
+A fonte de verdade da vida do pet é o **Supabase** (Postgres + Edge Functions + cron).  
+O app iOS é **passivo**: mostra estado, manda contexto e conversa — sem “simular” decay local.
+
+> Detalhes de arquitetura: [`docs/CLOUD_FIRST.md`](docs/CLOUD_FIRST.md) · life modes: [`docs/LIFE_MODES.md`](docs/LIFE_MODES.md)
+
+---
+
+## No iPhone
+
+<p align="center">
+  <img src="docs/preview/ios-home.jpg" alt="Home do Companion com feed de pensamentos" width="280" />
+  &nbsp;&nbsp;
+  <img src="docs/preview/ios-profile.jpg" alt="Perfil com convivência e badges" width="280" />
+</p>
+
+| Home | Perfil |
+| --- | --- |
+| Card do pet, energia / afeto, feed de pensamentos e chat | Horas no sofá, rua, sono, músicas, games, badges e títulos |
+
+### Widgets (mesma plate do app)
+
+<p align="center">
+  <img src="docs/preview/ios-widget-small.jpg" alt="Widget small" width="220" />
+  &nbsp;&nbsp;
+  <img src="docs/preview/ios-widget-medium.jpg" alt="Widget medium" width="420" />
+</p>
+
+Home Screen e Lock Screen espelham o snapshot do App Group: stats, fala e **céu igual ao do app** (clima + hora).
+
+Também há **Dynamic Island / Live Activity** para presença rápida fora do app.
 
 ---
 
@@ -30,230 +68,115 @@ Cada personalidade do quiz nasce um dino diferente:
 
 | | | | | |
 |:---:|:---:|:---:|:---:|:---:|
-| <img src="docs/preview/doux.png" width="96" /><br/>**Doux**<br/>curioso | <img src="docs/preview/vita.png" width="96" /><br/>**Vita**<br/>carinhoso | <img src="docs/preview/olaf.png" width="96" /><br/>**Olaf**<br/>preguiçoso | <img src="docs/preview/mort.png" width="96" /><br/>**Mort**<br/>zoeiro | <img src="docs/preview/kuro.png" width="96" /><br/>**Kuro**<br/>misterioso |
+| <img src="docs/preview/doux.png" width="88" /><br/>**Doux**<br/>curioso | <img src="docs/preview/vita.png" width="88" /><br/>**Vita**<br/>carinhoso | <img src="docs/preview/olaf.png" width="88" /><br/>**Olaf**<br/>preguiçoso | <img src="docs/preview/mort.png" width="88" /><br/>**Mort**<br/>zoeiro | <img src="docs/preview/kuro.png" width="88" /><br/>**Kuro**<br/>misterioso |
 
 <p align="center">
-  <img src="docs/preview/egg.png" alt="Ovo do companion" width="72" /><br/>
+  <img src="docs/preview/egg.png" alt="Ovo" width="64" /><br/>
   <sub>Começa no ovo — o hatch só depois do quiz</sub>
 </p>
 
 ---
 
-## Céu por hora do dia
+## Céu dinâmico
 
-Amanhecer · dia · entardecer · noite · tempestade
+Amanhecer · dia · entardecer · noite · tempestade · nublado · neve
+
+O plate muda com **hora local** e **clima real** (Open-Meteo). App e widgets usam a mesma plate.
 
 <p align="center">
-  <img src="docs/preview/skies-strip.png" alt="Céus do companion" width="900" />
+  <img src="docs/preview/skies-strip.png" alt="Faixa de céus Craftpix" width="900" />
 </p>
 
 ---
 
-## O que ele faz
+## Como funciona (visão rápida)
 
-- **Quiz de personalidade** — responde umas perguntas e nasce um dino
-- **Animações pixel** — idle, corrida, pulo, dash, poke, chat e nascimento do ovo
-- **Céu dinâmico** — muda com a hora (+ clima do dia)
-- **Spotify / Apple Music** — detecta a faixa (se o app já estiver aberto) e comenta
-- **Tray + minimizar** — some pro tray e manda notificações personalizadas
-- **Chat com LLM** — DeepSeek / NVIDIA → OpenRouter → voz local
-- **Clima real** — temperatura da sua região (não inventa graus)
-- **Build DMG** — app standalone com API embutida
-- **iOS (SwiftUI)** — widget, lock screen e Dynamic Island (`apps/ios`)
+```mermaid
+flowchart LR
+  ios[iOS app / widgets]
+  edge[Edge Functions]
+  db[(Supabase Postgres)]
+  ios -->|contexto: wifi, steps, mídia, clima| edge
+  edge --> db
+  db -->|estado, pensamentos, badges| ios
+  cron[pg_cron tick] --> db
+```
 
-Design: widget arredondado, dino à esquerda no céu, painel de ações à direita.
+| Peça | Papel |
+| --- | --- |
+| **Life modes** | `indoor` / `work` / `sleep` — sofá regenera, rua gasta, sono congela decay |
+| **Tick** | Cron aplica decay e pode soltar pensamentos |
+| **Context ingest** | App manda presença, horário, clima, Now Playing… |
+| **Badges** | Títulos de convivência + badges secretas (clima / madrugada / tempestade) |
+| **Chat** | LLM com personalidade; fallback de voz local |
 
 ---
 
-## Estrutura
+## Estrutura do monorepo
 
 ```
 companion-backend/
-├── src/                 # Express LEGACY (LLM/voz no pack Mac; sem decay cloud)
-├── supabase/functions/  # Edge: companion-state, context-ingest, steps-ingest, tick-decay
-├── prisma/              # schema + RPCs survival / life modes
-├── apps/desktop/        # Electron LEGACY (UI fina; sem survival nova)
-├── apps/ios/            # SwiftUI passivo (HealthKit + contexto + Live Activity)
-├── scripts/
-├── docs/CLOUD_FIRST.md  # contrato cloud
-├── docs/LIFE_MODES.md   # work / indoor / sleep
-└── data/                # sessão local (gitignored)
+├── apps/ios/            # SwiftUI — produto principal
+├── supabase/functions/  # companion-state, context-ingest, steps, thoughts, tick-decay
+├── prisma/              # schema + migrations / RPCs de survival
+├── apps/desktop/        # Electron LEGADO (manutenção)
+├── src/                 # Express LEGADO (LLM/voz no pack Mac)
+└── docs/                # cloud-first, life modes, previews
 ```
 
 ---
 
-## Setup
+## Começar
 
-**Requisitos:** Node.js 20+, macOS (para o desktop + mídia).
+### iOS (caminho principal)
+
+**Requisitos:** macOS, Xcode, iOS 16.2+.
 
 ```bash
 git clone https://github.com/cauesilva1/Companion-App.git
 cd Companion-App
-npm install          # SEMPRE na raiz — nunca dentro de apps/desktop
-cp .env.example .env
-```
-
-> Workspaces npm: existe **um** `package-lock.json` na raiz. Instalar de novo em `apps/desktop` baixa o Electron outra vez e pode parecer “loop de dependências” no Cursor.
-
-Edite o `.env` com suas chaves (nunca commite esse arquivo):
-
-| Variável | Onde pegar |
-| --- | --- |
-| `NVIDIA_API_KEY` | [build.nvidia.com](https://build.nvidia.com) |
-| `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) |
-| `HUGGINGFACE_API_KEY` | opcional |
-| `DATABASE_URL` + `DIRECT_URL` | Supabase Postgres (migrations) |
-| `SUPABASE_URL` + `SUPABASE_ANON_KEY` | Sync direto nos clients (Auth + REST) |
-
-**Sem banco:** Express em mock JSON local.
-
-**Sync PC ↔ iPhone:** configure Supabase nos clients (não precisa hospedar Express).
-No desktop:
-
-```bash
-cp apps/desktop/.env.example apps/desktop/.env
-# SUPABASE_URL=https://xxxx.supabase.co
-# SUPABASE_ANON_KEY=eyJ...
-# API_URL local só se quiser o mock Express embutido
-```
-
----
-
-## Cloud (sem Mac na LAN, sem Express hospedado)
-
-Fluxo: **Supabase Auth + Postgres** direto nos clients (como Next).
-
-1. No dashboard Supabase: Auth email/senha; rode `npx prisma migrate deploy` (RLS).
-2. `.env`: `SUPABASE_URL` + `SUPABASE_ANON_KEY`, depois `node scripts/sync-supabase-config.mjs`.
-3. iPhone / desktop: usuário só cria conta (email/senha).
-
-Express (`npm run dev`) continua só para mock local no Mac — **não** precisa Railway/Fly para sync.
-
-> Se a senha do banco vazou, troque no Supabase.
----
-
-## Rodar
-
-```bash
-npm run dev
-```
-
-Sobe a API em `http://127.0.0.1:3333` e abre o Electron quando `/health` responder.
-
-Só API:
-
-```bash
-npm run dev:api
-```
-
----
-
-## Build (app standalone no Mac)
-
-Gera um `.app` / `.dmg` que **sobe a API sozinho** — no dia a dia você não precisa de `npm run dev`.
-
-**Requisitos:** Node.js 20+, macOS, `.env` na raiz com as chaves da LLM (o script de prepare copia esse `.env` para o bundle, **sem** `DATABASE_URL`, modo mock).
-
-```bash
-npm install
-cp .env.example .env   # se ainda não tiver; preencha as chaves
-npm run dist:mac
-```
-
-Isso:
-
-1. Compila a API e monta `apps/desktop/resources/api`
-2. Gera o ícone (dino Mort) e empacota o Electron
-3. Cria o DMG com `hdiutil`
-
-**Saída:**
-
-| Arquivo | Caminho |
-| --- | --- |
-| App | `apps/desktop/release/mac/Companion.app` |
-| DMG | `apps/desktop/release/Companion-1.0.0-mac.dmg` |
-
-**Usar o app:**
-
-1. Abra o DMG (ou o `.app` direto)
-2. Arraste **Companion** para Aplicativos (opcional)
-3. Na primeira abertura: clique com o botão direito → **Abrir** (app sem assinatura Apple)
-4. Dados locais ficam em `~/Library/Application Support/Companion/`
-
-Para sync com o iPhone: mesma conta Supabase (`SUPABASE_URL` + anon key no `.env` do desktop e na Config do iOS). **Sem** API Express na nuvem.
-
-Só a pasta do app (sem DMG):
-
-```bash
-npm run prepare:desktop
-npm run build --workspace=companion-desktop
-npm run pack --workspace=companion-desktop
-```
-
----
-
-## iOS (SwiftUI)
-
-App nativo com **widget**, **tela de bloqueio** e **Dynamic Island**.  
-Código em [`apps/ios/`](apps/ios/) — detalhes em [`apps/ios/README.md`](apps/ios/README.md).
-
-**Modo padrão:** Supabase (conta email/senha) ou standalone local. **Não precisa de API Express na nuvem.**
-
-- Now Playing (título/artista), missões, pegadinhas, 60 Hz no app
-- LAN Mac só em **Config → Avançado**
-**Requisitos:** macOS Sequoia 15+, **Xcode 26.3** Universal, iOS 16.2+.
-
-```bash
 ./scripts/generate-ios-project.sh
 open apps/ios/Companion.xcodeproj
 ```
 
----
+No app: conta Supabase (email/senha). Detalhes em [`apps/ios/README.md`](apps/ios/README.md).
 
-## Modelos NVIDIA (cascata)
+### Cloud (Supabase)
 
-Ordem padrão (configurável em `NVIDIA_MODELS` / `NVIDIA_MODEL`):
+1. Auth email/senha no dashboard  
+2. `npx prisma migrate deploy`  
+3. Deploy das Edge Functions: `./scripts/deploy-edge-functions.sh`  
+4. `.env` com `SUPABASE_URL` + `SUPABASE_ANON_KEY` (+ DB URLs para migrate)
 
-1. `deepseek-ai/deepseek-v4-pro-0813` (primário)
-2. um fallback da lista / OpenRouter
-3. fala local se tudo falhar
+Contrato: [`docs/CLOUD_FIRST.md`](docs/CLOUD_FIRST.md).
 
-Perguntas de clima usam localização (IP) + Open-Meteo e citam temperatura real da região.
+### Desktop / API local (legado)
 
----
+```bash
+npm install          # sempre na raiz
+cp .env.example .env
+npm run dev          # API + Electron
+```
 
-## Atalhos e tray
-
-- `Cmd+Shift+C` — mostra / esconde
-- **−** / **×** — minimizar pro tray
-- Clique no tray ou na notificação — volta
-- Spotify: **Ajustes → Privacidade → Automação** (permitir controlar Spotify)
-
----
-
-## API (resumo)
-
-| Método | Rota | Uso |
-| --- | --- | --- |
-| `POST` | `/auth/register` | cria conta email/senha → JWT |
-| `POST` | `/auth/login` | login → JWT |
-| `GET` | `/auth/me` | usuário autenticado |
-| `POST` | `/companion` | cria companion (Bearer) |
-| `GET` | `/companion/me` | pet da conta |
-| `GET` | `/companion/:id/state` | estado + humor |
-| `POST` | `/companion/:id/interact` | Poke / Feed / Play / Chat / Tease |
-| `GET` | `/companion/:id/feed` | histórico |
-| `GET` | `/missions/today` | missões do dia |
-| `POST` | `/missions/:id/claim` | resgata recompensa |
-| `POST` | `/missions/open-app` | progresso “abrir app” |
-
-Com `DATABASE_URL` as rotas companion/missions exigem `Authorization: Bearer <token>`. Sem DB = mock local sem auth.
+Útil para mock LLM/voz no Mac. **Não** é a fonte de survival.
 
 ---
 
-## Créditos de arte / som
+## Variáveis úteis
 
-Ver [apps/desktop/ATTRIBUTION.md](apps/desktop/ATTRIBUTION.md):
+| Variável | Uso |
+| --- | --- |
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | Clients (Auth + REST) |
+| `DATABASE_URL` / `DIRECT_URL` | Migrations Prisma |
+| `NVIDIA_API_KEY` / `OPENROUTER_API_KEY` | Chat LLM (legado / desktop) |
+
+`.env` fica fora do git. Se alguma chave vazou, revogue.
+
+---
+
+## Créditos
+
+Ver [`apps/desktop/ATTRIBUTION.md`](apps/desktop/ATTRIBUTION.md):
 
 - Dinos — [arks / Dino Characters](https://arks.itch.io/dino-characters)
 - Céus — Craftpix / Free Game Assets
@@ -261,48 +184,6 @@ Ver [apps/desktop/ATTRIBUTION.md](apps/desktop/ATTRIBUTION.md):
 
 ---
 
-## Segurança
-
-- `.env` está no `.gitignore` — **não** suba chaves reais
-- Use só placeholders em `.env.example`
-- Sessão local e `data/` também ficam fora do git
-- `apps/desktop/resources/` e `apps/desktop/release/` (bundle/DMG) também ficam fora do git
-- API escuta em `127.0.0.1` por padrão (`HOST=0.0.0.0` no Docker / LAN)
-- Body JSON limitado a 32kb; `POST .../interact` tem rate limit básico
-- Auth: email + senha (bcrypt) + JWT — sem Sign in with Apple/Google neste ciclo
-
-Se uma chave ou senha do banco vazou, **revogue e gere outra**.
-
----
-
-## Cursor / Windows: CPU alta ao abrir o repo
-
-Sintoma típico: Cursor em 100% CPU e mensagem de “instalação de dependências em loop”.
-
-Causas comuns neste monorepo:
-
-1. **`npm install` na pasta errada** (`apps/desktop` além da raiz) → segundo download do Electron (~250MB+)
-2. **Indexação** de `node_modules`, `release/`, `resources/` (centenas de MB / dezenas de milhares de arquivos)
-3. Extensões órfãs do próprio Cursor (não é bug do repo) — limpar pasta de extensions ajuda
-
-Mitigações já no repo:
-
-- `.cursorignore` — Cursor não deve indexar builds/deps
-- `.npmrc` + lockfile só na raiz
-- `apps/desktop/package-lock.json` removido / ignorado
-
-Para o amigo no Windows:
-
-```bash
-# na raiz do clone
-rm -rf node_modules apps/desktop/node_modules
-npm install
-```
-
-No Cursor: Settings → desativar auto-run de tasks se houver; não abrir a pasta `apps/desktop/release` como workspace.
-
----
-
 ## Licença
 
-Projeto pessoal / experimental. Assets de terceiros seguem as licenças dos respectivos autores (ver ATTRIBUTION).
+Projeto pessoal / experimental. Assets de terceiros seguem as licenças dos autores.

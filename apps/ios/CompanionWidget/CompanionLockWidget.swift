@@ -9,7 +9,7 @@ struct CompanionLockWidget: Widget {
     StaticConfiguration(kind: kind, provider: CompanionLockProvider()) { entry in
       CompanionLockView(entry: entry)
         // iOS 17+ exige containerBackground — sem isso o gallery mostra "!" quebrado.
-        .companionMockupWidgetBackground()
+        .companionMockupWidgetBackground(sky: entry.sky)
         .widgetURL(URL(string: "companion://feed?source=lock"))
     }
     .configurationDisplayName("Companion Lock")

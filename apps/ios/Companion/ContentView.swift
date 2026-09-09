@@ -50,6 +50,10 @@ final class CompanionViewModel: ObservableObject {
   @Published var thoughtFeed: [ThoughtFeedEntry] = ThoughtFeedStore.load()
   @Published var openConversationFromWidget = false
 
+  var skyPeriod: SkyPeriod {
+    snapshot.resolvedSkyPeriod
+  }
+
   let pranks = PrankController()
   private var ambientTask: Task<Void, Never>?
   private var thoughtTask: Task<Void, Never>?
@@ -437,13 +441,18 @@ final class CompanionViewModel: ObservableObject {
           }
           await LiveActivityController.update(snapshot: remote)
           await ContextTelemetryService.shared.ingestNow()
-          // Re-pull leve se o ingest mudou lifeMode / morningThought / thoughts
+          // Re-pull leve se o ingest mudou lifeMode / morningThought / thoughts / clima
           if let again = try? await SupabaseClient.shared.fetchCloudState(), !again.snapshot.isDemoPlaceholder {
             apply(snapshot: again.snapshot, reaction: reaction)
             thoughtFeed = ThoughtFeedStore.load()
             syncThoughtsFromStores()
             if let mode = again.snapshot.lifeMode {
               HouseZoneStore.syncWithLifeMode(CompanionLifeMode.parse(mode))
+            }
+          } else if let snap = CompanionSnapshotStore.load(), !snap.isDemoPlaceholder {
+            // Fallback: ingest já gravou weather no store espelho
+            if snap.weatherCondition != nil {
+              apply(snapshot: snap, reaction: reaction)
             }
           }
           await consumeMorningThoughtIfNeeded()
@@ -757,9 +766,6 @@ final class CompanionViewModel: ObservableObject {
         guard !Task.isCancelled else { return }
         if self.needsQuiz || self.needsAuth || self.isHatching { continue }
         // Telemetria a cada ~2 ciclos, não a cada mensagem
-        if Bool.random() {
-          await ContextTelemetryService.shared.ingestNow()
-        }
         let kind: String = {
           switch CompanionLifeMode.parse(self.snapshot.lifeMode) {
           case .sleep: return "dream"
@@ -767,35 +773,52 @@ final class CompanionViewModel: ObservableObject {
           case .indoor: return "rest"
           }
         }()
+        // Reavalia lifeMode (entrar em sleep após 23h mesmo com app aberto).
+        if Bool.random() || CompanionLifeMode.localHour >= CompanionLifeMode.bedtimeHour
+          || CompanionLifeMode.localHour < CompanionLifeMode.wakeHour {
+          await ContextTelemetryService.shared.ingestNow()
+        }
         await self.emitAutonomousThought(kind: kind)
       }
     }
   }
 
-  /// Injeta o pensamento matinal guardado na cloud na 1ª abertura do dia (depois das 6h).
+  /// Injeta o pensamento matinal na 1ª abertura do dia (depois das 6h).
+  /// Se a cloud não seedou (sem sleep→wake), gera história local geek.
   func consumeMorningThoughtIfNeeded() async {
     let mode = CompanionLifeMode.parse(snapshot.lifeMode)
     // Antes das 6h ainda está "meio dormindo" — não joga bom-dia.
     guard !mode.isPreWakeDrowsy else { return }
     guard CompanionLifeMode.localHour >= CompanionLifeMode.wakeHour else { return }
 
-    let line = snapshot.morningThought
-      ?? LifeModeStore.pendingMorningThought
-    guard let line, !line.isEmpty else { return }
-    let already = thoughtFeed.contains { $0.kind == "morning" && $0.text == line }
-    if !already {
-      let entry = ThoughtFeedEntry.make(
-        text: line,
-        kind: "morning",
-        zoneName: HouseZoneStore.activeZone()?.name
-      )
-      thoughtFeed = ThoughtFeedStore.append(entry)
-      reaction = line
-      WidgetSpeechStore.saveIdle(line: line, name: snapshot.name)
-      WidgetReloader.reload()
+    let dayKey = Self.localDayKey()
+    let alreadyToday = thoughtFeed.contains {
+      $0.kind == "morning" && Self.isSameLocalDay($0.createdAt, dayKey: dayKey)
     }
+    if alreadyToday {
+      LifeModeStore.pendingMorningThought = nil
+      return
+    }
+
+    var line = snapshot.morningThought ?? LifeModeStore.pendingMorningThought
+    if line == nil || line?.isEmpty == true {
+      line = LocalVoice.morningOpenStory(name: snapshot.name, archetype: snapshot.archetype)
+    }
+    guard let line, !line.isEmpty else { return }
+
+    let entry = ThoughtFeedEntry.make(
+      text: line,
+      kind: "morning",
+      zoneName: HouseZoneStore.activeZone()?.name
+    )
+    thoughtFeed = ThoughtFeedStore.append(entry)
+    reaction = line
+    WidgetSpeechStore.saveIdle(line: line, name: snapshot.name)
+    WidgetReloader.reload()
     LifeModeStore.pendingMorningThought = nil
-    // Ack na cloud (limpa morningThought após consumir)
+
+    // Ack limpa morningThought — preserva mídia atual (não zera mediaHint).
+    let mediaLine = NowPlayingService.shared.line
     _ = try? await SupabaseClient.shared.ingestContext(
       onHomeWifi: nil,
       ssid: nil,
@@ -803,13 +826,24 @@ final class CompanionViewModel: ObservableObject {
       stepsRecent: 0,
       isCharging: false,
       localHour: Calendar.current.component(.hour, from: Date()),
-      mediaActive: false,
-      mediaHint: nil,
+      mediaActive: mediaLine != nil,
+      mediaHint: mediaLine,
       homeWifiSsid: LifeModeStore.homeWifiSsid,
       xboxGamertag: LifeModeStore.xboxGamertag,
       ackMorning: true,
       appForeground: true
     )
+  }
+
+  private static func localDayKey(for date: Date = Date()) -> String {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = .current
+    let c = cal.dateComponents([.year, .month, .day], from: date)
+    return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+  }
+
+  private static func isSameLocalDay(_ date: Date, dayKey: String) -> Bool {
+    localDayKey(for: date) == dayKey
   }
 
   func emitAutonomousThought(kind: String) async {
@@ -979,6 +1013,21 @@ final class CompanionViewModel: ObservableObject {
       return
     }
 
+    // CRÍTICO: pull da cloud sem weather/sky não pode apagar o céu do widget.
+    var snapshot = snapshot
+    if snapshot.weatherCondition == nil || snapshot.weatherCondition?.isEmpty == true {
+      snapshot.weatherCondition = self.snapshot.weatherCondition
+        ?? CompanionSnapshotStore.loadWeatherCondition()
+      snapshot.weatherTempC = snapshot.weatherTempC
+        ?? self.snapshot.weatherTempC
+    }
+    if snapshot.skyPeriodRaw == nil || snapshot.skyPeriodRaw?.isEmpty == true {
+      snapshot.skyPeriodRaw = self.snapshot.skyPeriodRaw
+      if snapshot.skyPeriodRaw == nil, let w = snapshot.weatherCondition, !w.isEmpty {
+        snapshot.skyPeriodRaw = SkyPeriod.from(weather: w).rawValue
+      }
+    }
+
     // Forma visual única (sem growth).
     if ambientBootstrapped {
       if snapshot.mood.uppercased() == "SLEEPY", spriteClip == .idle || spriteClip == .sleep {
@@ -1002,13 +1051,34 @@ final class CompanionViewModel: ObservableObject {
     }
     if !snapshot.isDemoPlaceholder {
       CompanionSnapshotStore.save(snapshot)
+      if let wx = snapshot.weatherCondition, !wx.isEmpty {
+        let period = SkyPeriod(rawValue: snapshot.skyPeriodRaw ?? "")
+          ?? SkyPeriod.from(weather: wx)
+        CompanionSnapshotStore.saveWeather(condition: wx, tempC: snapshot.weatherTempC)
+        CompanionSnapshotStore.saveSkyPeriod(period)
+      } else if let raw = snapshot.skyPeriodRaw, let period = SkyPeriod(rawValue: raw) {
+        CompanionSnapshotStore.saveSkyPeriod(period)
+      }
     }
     WidgetReloader.reload()
     LowEnergyNotifier.check(energyPercent: snapshot.energyPercent, companionName: snapshot.name)
     LonelinessNotifier.check(mood: snapshot.mood, companionName: snapshot.name)
   }
 
-  /// Atualiza mídia / Xbox / lifeMode a partir do snapshot cloud.
+  /// Atualiza só o clima (app + App Group + widget) — mesma plate nos dois.
+  func applyWeather(condition: String, tempC: Int?, latitude: Double? = nil, longitude: Double? = nil) {
+    var next = snapshot
+    next.weatherCondition = condition
+    next.weatherTempC = tempC
+    let period = SkyPeriod.from(weather: condition)
+    next.skyPeriodRaw = period.rawValue
+    CompanionSnapshotStore.saveWeather(condition: condition, tempC: tempC, latitude: latitude, longitude: longitude)
+    CompanionSnapshotStore.saveSkyPeriod(period)
+    apply(snapshot: next, reaction: nil)
+    WidgetReloader.reload()
+  }
+
+  /// Atualiza mídia / Xbox / lifeMode / clima a partir do snapshot cloud.
   func applyCloudMedia(_ cloud: CompanionSnapshot) {
     var next = snapshot
     next.mediaHint = cloud.mediaHint
@@ -1018,6 +1088,14 @@ final class CompanionViewModel: ObservableObject {
     if let title = cloud.activeTitle { next.activeTitle = title }
     if let tk = cloud.titleKey { next.titleKey = tk }
     if let ek = cloud.equippedTitleKey { next.equippedTitleKey = ek }
+    if let wx = cloud.weatherCondition { next.weatherCondition = wx }
+    if let temp = cloud.weatherTempC { next.weatherTempC = temp }
+    if let wx = next.weatherCondition {
+      let period = SkyPeriod.from(weather: wx)
+      next.skyPeriodRaw = period.rawValue
+      CompanionSnapshotStore.saveWeather(condition: wx, tempC: next.weatherTempC)
+      CompanionSnapshotStore.saveSkyPeriod(period)
+    }
     next.energy = cloud.energy
     next.affection = cloud.affection
     next.mood = cloud.mood
@@ -1111,7 +1189,8 @@ struct ContentView: View {
   private var homeTurns: [ChatTurn] {
     var turns = model.chatHistory
     let chatTexts = Set(turns.map(\.text))
-    let allowedKinds: Set<String> = ["rest", "dream", "work", "music", "morning", "cloud", "mood", "gaming", "widget"]
+    // Música fica só no banner fixo — não entra como bolha no fio.
+    let allowedKinds: Set<String> = ["rest", "dream", "work", "morning", "cloud", "mood", "gaming", "widget"]
     for entry in model.thoughtFeed {
       if chatTexts.contains(entry.text) { continue }
       if !allowedKinds.contains(entry.kind) { continue }
@@ -1139,12 +1218,17 @@ struct ContentView: View {
   var body: some View {
     NavigationStack {
       ZStack {
-        SkyBackground()
+        SkyBackground(period: model.skyPeriod)
         VStack(spacing: 0) {
           compactHero
             .padding(.horizontal, 16)
             .padding(.top, 6)
             .padding(.bottom, 6)
+          if let track = musicBannerLine {
+            homeMusicBanner(track)
+              .padding(.horizontal, 16)
+              .padding(.bottom, 6)
+          }
           homeChat
         }
       }
@@ -1196,6 +1280,19 @@ struct ContentView: View {
         }
       }
       .task { await model.bootstrap() }
+      .task {
+        // Aquece Open-Meteo e grava no App Group — widget usa a mesma chave.
+        if let snap = try? await WeatherService.snapshot() {
+          await MainActor.run {
+            model.applyWeather(
+              condition: snap.condition.rawValue,
+              tempC: snap.tempC,
+              latitude: snap.latitude,
+              longitude: snap.longitude
+            )
+          }
+        }
+      }
       .onOpenURL { url in
         let host = url.host?.lowercased() ?? ""
         if host == "chat" || host == "feed" || url.path.contains("feed") {
@@ -1215,21 +1312,13 @@ struct ContentView: View {
         }
       }
       .onAppear { dismissChatKeyboard() }
-      .onReceive(NotificationCenter.default.publisher(for: .companionNowPlayingChanged)) { note in
+      .onReceive(NotificationCenter.default.publisher(for: .companionNowPlayingChanged)) { _ in
+        // Banner já atualiza via NowPlayingService.line — só sync cloud, sem jogar faixa no chat.
         Task {
           await ContextTelemetryService.shared.ingestNow()
           if let cloud = try? await SupabaseClient.shared.fetchCloudState() {
             await MainActor.run {
               model.applyCloudMedia(cloud.snapshot)
-              model.thoughtFeed = ThoughtFeedStore.load()
-              if let line = note.userInfo?["line"] as? String, !line.isEmpty {
-                model.reaction = line
-                WidgetSpeechStore.saveIdle(line: line, name: model.snapshot.name)
-              }
-              WidgetReloader.reload()
-            }
-          } else {
-            await MainActor.run {
               model.thoughtFeed = ThoughtFeedStore.load()
               WidgetReloader.reload()
             }
@@ -1351,9 +1440,6 @@ struct ContentView: View {
     ScrollViewReader { proxy in
       ScrollView(showsIndicators: false) {
         LazyVStack(alignment: .leading, spacing: 12) {
-          if let track = musicBannerLine {
-            homeMusicBanner(track)
-          }
           if homeTurns.isEmpty && !model.isBusy {
             homeEmptyChat
               .id("empty-home-chat")

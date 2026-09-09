@@ -88,6 +88,22 @@ final class ContextTelemetryService: ObservableObject {
 
     _ = HouseZoneStore.resolveActiveZone(ssid: ssid)
 
+    let coords = await WeatherService.coordinatesIfAuthorized()
+    let weatherSnap = WeatherService.cachedSnapshot()
+    // Prefetch leve em foreground (não bloqueia se falhar)
+    var condition = weatherSnap?.condition.rawValue
+    var tempC = weatherSnap?.tempC
+    var lat = coords?.lat ?? weatherSnap?.latitude
+    var lon = coords?.lon ?? weatherSnap?.longitude
+    if foreground, weatherSnap == nil, coords != nil {
+      if let fresh = try? await WeatherService.snapshot() {
+        condition = fresh.condition.rawValue
+        tempC = fresh.tempC
+        lat = fresh.latitude
+        lon = fresh.longitude
+      }
+    }
+
     guard SupabaseConfig.isConfigured, KeychainStore.get(.supabaseAccess) != nil else {
       let mode = localHeuristic(
         onHome: onHome,
@@ -112,7 +128,11 @@ final class ContextTelemetryService: ObservableObject {
         mediaHint: mediaLine,
         homeWifiSsid: home,
         xboxGamertag: LifeModeStore.xboxGamertag,
-        appForeground: foreground
+        appForeground: foreground,
+        latitude: lat,
+        longitude: lon,
+        weatherCondition: condition,
+        weatherTempC: tempC
       )
       let mode = CompanionLifeMode.parse(result.lifeMode)
       lastLifeMode = mode
@@ -131,7 +151,16 @@ final class ContextTelemetryService: ObservableObject {
         if let title = result.activeTitle { snap.activeTitle = title }
         if let tk = result.titleKey { snap.titleKey = tk }
         if let ek = result.equippedTitleKey { snap.equippedTitleKey = ek }
+        if let wx = result.weatherCondition {
+          snap.weatherCondition = wx
+          let period = SkyPeriod.from(weather: wx)
+          snap.skyPeriodRaw = period.rawValue
+          CompanionSnapshotStore.saveWeather(condition: wx, tempC: result.weatherTempC)
+          CompanionSnapshotStore.saveSkyPeriod(period)
+        }
+        if let wtemp = result.weatherTempC { snap.weatherTempC = wtemp }
         CompanionSnapshotStore.save(snap)
+        WidgetReloader.reload()
       }
       if result.thoughts != nil {
         // ThoughtFeedStore já atualizado em ingestContext

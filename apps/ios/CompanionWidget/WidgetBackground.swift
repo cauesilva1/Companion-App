@@ -1,6 +1,7 @@
 import SwiftUI
 import WidgetKit
 
+/// Mesmo visual do `SkyBackground` do app (gradiente + plate + véu).
 private struct SkyWidgetFill: View {
   let sky: SkyPeriod
 
@@ -10,16 +11,30 @@ private struct SkyWidgetFill: View {
       Image(sky.imageName)
         .resizable()
         .scaledToFill()
-        .opacity(0.55)
+        .opacity(sky.preferredArtOpacity)
+      LinearGradient(
+        colors: [
+          Color.white.opacity(0.05),
+          Color.white.opacity(0.18),
+          Color(red: 0.95, green: 0.97, blue: 1.0).opacity(0.45),
+          Color(red: 0.94, green: 0.96, blue: 0.99).opacity(0.70),
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+      )
     }
   }
 }
 
 extension View {
-  /// Fundo de céu por hora do dia (widgets).
+  @ViewBuilder
+  func companionMockupWidgetBackground(sky: SkyPeriod) -> some View {
+    companionWidgetBackground(sky: sky)
+  }
+
   @ViewBuilder
   func companionMockupWidgetBackground() -> some View {
-    companionWidgetBackground(sky: .current())
+    companionWidgetBackground(sky: SkyPeriod.resolved())
   }
 
   @ViewBuilder
@@ -33,7 +48,6 @@ extension View {
     }
   }
 
-  /// iOS 17+ aplica margem interna ~16pt — cancela pra usar o retângulo todo.
   @ViewBuilder
   func companionExpandIntoMargins() -> some View {
     if #available(iOSApplicationExtension 17.0, *) {
@@ -43,7 +57,6 @@ extension View {
     }
   }
 
-  /// Fundo correto pra accessory (lock) — sem céu colorido.
   @ViewBuilder
   func companionAccessoryBackground() -> some View {
     if #available(iOSApplicationExtension 17.0, *) {

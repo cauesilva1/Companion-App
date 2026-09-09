@@ -1,6 +1,9 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient, userClient } from "../_shared/supabase.ts";
 import { fetchXboxStatus } from "../_shared/xbox.ts";
+import { resolveWeather } from "../_shared/weather.ts";
+
+const WEATHER_STALE_MS = 25 * 60_000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -41,7 +44,6 @@ Deno.serve(async (req) => {
       });
       if (updated) row = updated;
       else row = { ...row, gamingStatus: xbox.line };
-      // Feed row when indoor
       if (row.lifeMode === "indoor") {
         await sb.rpc("companion_append_thought", {
           p_user_id: userId,
@@ -53,7 +55,58 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Sync títulos + bundle de perfil/badges
+  // Refresh weather if stale (>25 min) using saved coords or Toronto
+  const weatherAtMs = row.weatherAt ? Date.parse(String(row.weatherAt)) : 0;
+  const weatherStale = !Number.isFinite(weatherAtMs) || Date.now() - weatherAtMs > WEATHER_STALE_MS;
+  if (weatherStale) {
+    const tz = String(row.timezone || "America/Toronto");
+    let localHour = new Date().getHours();
+    try {
+      const fmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        hour: "numeric",
+        hour12: false,
+      });
+      localHour = Number(fmt.format(new Date()));
+    } catch {
+      /* keep UTC hour */
+    }
+    try {
+      const weather = await resolveWeather({
+        latitude: typeof row.lat === "number" ? row.lat : null,
+        longitude: typeof row.lon === "number" ? row.lon : null,
+        condition: null,
+        tempC: null,
+        localHour,
+      });
+      const { data: wxRows } = await sb
+        .from("Companion")
+        .update({
+          weatherCondition: weather.condition,
+          weatherTempC: weather.tempC,
+          weatherAt: new Date().toISOString(),
+          lat: weather.latitude,
+          lon: weather.longitude,
+        })
+        .eq("id", row.id)
+        .select("*")
+        .limit(1);
+      if (wxRows?.[0]) row = wxRows[0];
+      else {
+        row = {
+          ...row,
+          weatherCondition: weather.condition,
+          weatherTempC: weather.tempC,
+          weatherAt: new Date().toISOString(),
+          lat: weather.latitude,
+          lon: weather.longitude,
+        };
+      }
+    } catch {
+      /* keep stale weather */
+    }
+  }
+
   await sb.rpc("companion_refresh_titles_for_user", { p_user_id: userId });
   const { data: refreshed } = await sb
     .from("Companion")
@@ -87,6 +140,9 @@ Deno.serve(async (req) => {
       equippedTitleKey: row.equippedTitleKey ?? null,
       decayFrozen: row.decayFrozen ?? false,
       presenceStatus: row.presenceStatus ?? "present",
+      weatherCondition: row.weatherCondition ?? null,
+      weatherTempC: row.weatherTempC ?? null,
+      weatherAt: row.weatherAt ?? null,
     },
   });
 });

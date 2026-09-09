@@ -140,9 +140,18 @@ final class NowPlayingService: ObservableObject {
     guard key != lastNotifiedKey else { return }
     lastNotifiedKey = key
 
+    // Banner / ingest na hora — não espera o LLM (isso fazia parecer “demora pra identificar”).
+    let trackLine: String = {
+      if let artist, !artist.isEmpty { return "\(title) — \(artist)" }
+      return title
+    }()
+    publish(line: trackLine, title: title, artist: artist)
     let snap = CompanionSnapshotStore.load()
-    let arch = snap?.archetype ?? "curioso"
+    let name = snap?.name ?? CompanionLocalStore.load().companions.first?.name ?? "Companion"
+    WidgetSpeechStore.saveMusic(title: title, artist: artist, comment: "", name: name)
+    WidgetReloader.reload()
 
+    let arch = snap?.archetype ?? "curioso"
     Task {
       let stored = CompanionLocalStore.load().companions.first
       let line = await LLMService.musicComment(
@@ -154,8 +163,6 @@ final class NowPlayingService: ObservableObject {
       )
       guard self.trackKey == key else { return }
       self.companionLine = line
-      self.publish(line: line, title: title, artist: artist)
-      let name = snap?.name ?? stored?.name ?? "Companion"
       WidgetSpeechStore.saveMusic(title: title, artist: artist, comment: line, name: name)
       WidgetReloader.reload()
       if Self.musicNotificationsEnabled {

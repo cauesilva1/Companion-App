@@ -6,13 +6,16 @@ struct CompanionEntry: TimelineEntry {
   let snapshot: CompanionSnapshot
   let frameIndex: Int
   let lastLine: String
+  /// Céu “assado” na entry — Home e galeria usam o mesmo valor.
+  let sky: SkyPeriod
 }
 
 enum CompanionWidgetTimeline {
-  static let frameInterval: TimeInterval = 0.2
-  static let cycleSeconds: TimeInterval = 4.0
+  static let frameInterval: TimeInterval = 0.35
+  /// Poucas entradas: timeline longa atrasa reload do clima.
+  static let cycleSeconds: TimeInterval = 1.4
 
-  static func entries(now: Date = Date(), snapshot: CompanionSnapshot) -> [CompanionEntry] {
+  static func entries(now: Date = Date(), snapshot: CompanionSnapshot, sky: SkyPeriod) -> [CompanionEntry] {
     #if canImport(UIKit)
     let sheet = DinoSpriteCatalog.sheetImage(skin: snapshot.skin, clip: .idle)
     let frameCount = max(1, sheet.map { DinoSpriteCatalog.frameCount(for: $0) } ?? 3)
@@ -20,13 +23,14 @@ enum CompanionWidgetTimeline {
     let frameCount = 3
     #endif
     let line = shortBlurb(for: snapshot, maxChars: 180)
-    let steps = Int(cycleSeconds / frameInterval)
+    let steps = max(1, Int(cycleSeconds / frameInterval))
     return (0..<steps).map { i in
       CompanionEntry(
         date: now.addingTimeInterval(Double(i) * frameInterval),
         snapshot: snapshot,
         frameIndex: i % frameCount,
-        lastLine: line
+        lastLine: line,
+        sky: sky
       )
     }
   }
@@ -34,23 +38,25 @@ enum CompanionWidgetTimeline {
   static func staticEntry(
     now: Date = Date(),
     snapshot: CompanionSnapshot,
-    maxChars: Int = 180
+    maxChars: Int = 180,
+    sky: SkyPeriod? = nil
   ) -> CompanionEntry {
-    CompanionEntry(
+    // Só espelha o céu do app — nunca resolve por hora sozinho.
+    let resolvedSky = sky ?? snapshot.resolvedSkyPeriod
+    return CompanionEntry(
       date: now,
       snapshot: snapshot,
       frameIndex: 0,
-      lastLine: shortBlurb(for: snapshot, maxChars: maxChars)
+      lastLine: shortBlurb(for: snapshot, maxChars: maxChars),
+      sky: resolvedSky
     )
   }
 
   static func shortBlurb(for snapshot: CompanionSnapshot, maxChars: Int) -> String {
     let full = latestLine(for: snapshot)
-    // Grava o texto COMPLETO — truncar só na UI do widget (senão a conversa herda o "…").
     if !WidgetSpeechStore.isGenericStatusLine(full) {
       WidgetSpeechStore.saveDisplayLine(full)
     }
-    // Soft-cap alto: o lineLimit do SwiftUI usa a altura do widget de verdade.
     return truncate(full, maxChars: max(maxChars, 180))
   }
 
@@ -75,7 +81,6 @@ enum CompanionWidgetTimeline {
         if firstGeneric == nil { firstGeneric = t }
         continue
       }
-      // Prefere frase completa; "…" é só visual do widget antigo pinado.
       if t.hasSuffix("…") || t.hasSuffix("...") {
         if let full = WidgetSpeechStore.expandTruncated(t) {
           return full
@@ -104,12 +109,25 @@ enum CompanionWidgetTimeline {
     return slice.trimmingCharacters(in: .whitespacesAndNewlines) + "…"
   }
 
+  /// Espelho puro do que o app gravou — sem Open-Meteo no widget.
   static func resolvedSnapshot() -> CompanionSnapshot {
-    CompanionSnapshotStore.load() ?? .demo
+    var snap = CompanionSnapshotStore.load() ?? .demo
+    if snap.weatherCondition == nil || snap.weatherCondition?.isEmpty == true,
+       let wx = CompanionSnapshotStore.loadWeatherCondition(), !wx.isEmpty {
+      snap.weatherCondition = wx
+    }
+    if snap.skyPeriodRaw == nil || snap.skyPeriodRaw?.isEmpty == true {
+      if let wx = snap.weatherCondition, !wx.isEmpty {
+        snap.skyPeriodRaw = SkyPeriod.from(weather: wx).rawValue
+      } else if let sky = CompanionSnapshotStore.loadSkyPeriod() {
+        snap.skyPeriodRaw = sky.rawValue
+      }
+    }
+    return snap
   }
 
   static var previewSnapshot: CompanionSnapshot {
-    CompanionSnapshot(
+    var snap = CompanionSnapshot(
       id: "preview",
       name: "Jaozinho",
       mood: "HAPPY",
@@ -129,34 +147,51 @@ enum CompanionWidgetTimeline {
       morningThought: nil,
       activeTitle: nil,
       titleKey: nil,
-      equippedTitleKey: nil
+      equippedTitleKey: nil,
+      weatherCondition: CompanionSnapshotStore.loadWeatherCondition(),
+      weatherTempC: nil,
+      skyPeriodRaw: CompanionSnapshotStore.loadSkyPeriod()?.rawValue
     )
+    if snap.skyPeriodRaw == nil, let wx = snap.weatherCondition {
+      snap.skyPeriodRaw = SkyPeriod.from(weather: wx).rawValue
+    }
+    return snap
   }
 }
 
 struct CompanionProvider: TimelineProvider {
   func placeholder(in context: Context) -> CompanionEntry {
-    CompanionWidgetTimeline.staticEntry(snapshot: CompanionWidgetTimeline.previewSnapshot, maxChars: 56)
+    let snap = CompanionWidgetTimeline.resolvedSnapshot()
+    return CompanionWidgetTimeline.staticEntry(
+      snapshot: snap,
+      maxChars: 56,
+      sky: snap.resolvedSkyPeriod
+    )
   }
 
   func getSnapshot(in context: Context, completion: @escaping (CompanionEntry) -> Void) {
-    if context.isPreview {
-      completion(placeholder(in: context))
-      return
+    var snap = CompanionWidgetTimeline.resolvedSnapshot()
+    if context.isPreview, snap.isDemoPlaceholder {
+      snap = CompanionWidgetTimeline.previewSnapshot
     }
     completion(
       CompanionWidgetTimeline.staticEntry(
-        snapshot: CompanionWidgetTimeline.resolvedSnapshot(),
-        maxChars: 180
+        snapshot: snap,
+        maxChars: 180,
+        sky: snap.resolvedSkyPeriod
       )
     )
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<CompanionEntry>) -> Void) {
     let snap = CompanionWidgetTimeline.resolvedSnapshot()
+    let sky = snap.resolvedSkyPeriod
     let now = Date()
-    let entries = CompanionWidgetTimeline.entries(now: now, snapshot: snap)
-    completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(CompanionWidgetTimeline.cycleSeconds))))
+    let entries = CompanionWidgetTimeline.entries(now: now, snapshot: snap, sky: sky)
+    // Timeline curta: espera o app gravar céu novo + WidgetReloader.
+    completion(
+      Timeline(entries: entries, policy: .after(now.addingTimeInterval(15 * 60)))
+    )
   }
 }
 
@@ -167,7 +202,7 @@ struct CompanionHomeWidget: Widget {
     StaticConfiguration(kind: kind, provider: CompanionProvider()) { entry in
       CompanionHomeView(entry: entry)
         .companionExpandIntoMargins()
-        .companionMockupWidgetBackground()
+        .companionMockupWidgetBackground(sky: entry.sky)
         .widgetURL(URL(string: "companion://feed?source=widget"))
     }
     .configurationDisplayName("Companion")
@@ -180,13 +215,10 @@ struct CompanionHomeView: View {
   @Environment(\.widgetFamily) private var family
   let entry: CompanionEntry
 
-  private var lightChrome: Bool { SkyPeriod.current().prefersLightChrome }
+  private var sky: SkyPeriod { entry.sky }
+  private var lightChrome: Bool { sky.prefersLightChrome }
   private var titleColor: Color { lightChrome ? Color.white : Color(red: 0.12, green: 0.18, blue: 0.32) }
   private var quoteColor: Color { lightChrome ? Color.white.opacity(0.95) : Color(red: 0.16, green: 0.22, blue: 0.36) }
-  private var mutedColor: Color { lightChrome ? Color.white.opacity(0.7) : Color(red: 0.34, green: 0.4, blue: 0.52) }
-  private var trackFill: Color {
-    lightChrome ? Color.white.opacity(0.22) : Color.black.opacity(0.1)
-  }
   private var panel: Color {
     lightChrome ? Color.black.opacity(0.2) : Color.white.opacity(0.42)
   }
@@ -241,7 +273,6 @@ struct CompanionHomeView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
-  /// Medium: dino em destaque + fala como citação (sem barras grossas poluídas).
   private var medium: some View {
     HStack(alignment: .center, spacing: 14) {
       WidgetDinoFrame(skin: entry.snapshot.skin, frameIndex: entry.frameIndex, size: 96)
