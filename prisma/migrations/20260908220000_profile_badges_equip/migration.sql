@@ -441,14 +441,14 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION companion_title_catalog() TO service_role;
-GRANT EXECUTE ON FUNCTION companion_title_label(text) TO service_role;
-GRANT EXECUTE ON FUNCTION companion_sync_titles(text) TO service_role;
-GRANT EXECUTE ON FUNCTION companion_resolve_title(text) TO service_role;
-GRANT EXECUTE ON FUNCTION companion_refresh_titles_for_user(text) TO service_role;
-GRANT EXECUTE ON FUNCTION companion_equip_title(text, text) TO service_role;
-GRANT EXECUTE ON FUNCTION companion_profile_stats(text) TO service_role;
-GRANT EXECUTE ON FUNCTION companion_tick_all() TO service_role;
+GRANT EXECUTE ON FUNCTION companion_title_catalog() TO service_role, authenticated;
+GRANT EXECUTE ON FUNCTION companion_title_label(text) TO service_role, authenticated;
+GRANT EXECUTE ON FUNCTION companion_sync_titles(text) TO service_role, authenticated;
+GRANT EXECUTE ON FUNCTION companion_resolve_title(text) TO service_role, authenticated;
+GRANT EXECUTE ON FUNCTION companion_refresh_titles_for_user(text) TO service_role, authenticated;
+GRANT EXECUTE ON FUNCTION companion_equip_title(text, text) TO service_role, authenticated;
+GRANT EXECUTE ON FUNCTION companion_profile_stats(text) TO service_role, authenticated;
+GRANT EXECUTE ON FUNCTION companion_tick_all() TO service_role, authenticated;
 
 -- Backfill: sync todos os companions existentes
 DO $$

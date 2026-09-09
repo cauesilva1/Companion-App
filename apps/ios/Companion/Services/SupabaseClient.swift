@@ -159,8 +159,15 @@ actor SupabaseClient {
   }
 
   /// Sessão utilizável: refresh se preciso + valida no servidor (com cache curto).
+  /// Falha de rede NÃO limpa tokens (evita logout fantasma offline).
   private var lastUserAssertAt: TimeInterval = 0
   private var lastUserAssertId: String = ""
+
+  private func isAuthFailure(_ error: Error) -> Bool {
+    if case SupabaseError.sessionExpired = error { return true }
+    if case SupabaseError.http(let code, _) = error, code == 401 { return true }
+    return false
+  }
 
   func validSession() async -> SupabaseSession? {
     guard var session = loadSession() else { return nil }
@@ -168,8 +175,12 @@ actor SupabaseClient {
       do {
         session = try await refreshSession(session)
       } catch {
-        saveSession(nil)
-        return nil
+        if isAuthFailure(error) {
+          saveSession(nil)
+          return nil
+        }
+        // Rede/timeout no refresh: mantém tokens e segue com a sessão local.
+        return session
       }
     }
     let now = Date().timeIntervalSince1970
@@ -183,10 +194,14 @@ actor SupabaseClient {
       lastUserAssertId = session.userId
       return session
     } catch {
-      saveSession(nil)
-      lastUserAssertAt = 0
-      lastUserAssertId = ""
-      return nil
+      if isAuthFailure(error) {
+        saveSession(nil)
+        lastUserAssertAt = 0
+        lastUserAssertId = ""
+        return nil
+      }
+      // Rede/timeout no assert: mantém sessão local.
+      return session
     }
   }
 
@@ -474,8 +489,13 @@ actor SupabaseClient {
     )
   }
 
-  /// Cloud-First: lê estado pós-decay via Edge Function.
-  func fetchCloudState() async throws -> CompanionSnapshot? {
+  struct CloudStateBundle: Sendable {
+    var snapshot: CompanionSnapshot
+    var profile: ProfileStatsDTO?
+  }
+
+  /// Cloud-First: lê estado pós-decay via Edge Function (+ profile/badges se presente).
+  func fetchCloudState() async throws -> CloudStateBundle? {
     let session = try await requireSession()
     let data = try await request(
       path: "/functions/v1/companion-state",
@@ -520,9 +540,12 @@ actor SupabaseClient {
       if let thoughts = env.thoughts {
         _ = ThoughtFeedStore.replaceAll(thoughts.map { ThoughtFeedStore.fromCloud($0) })
       }
-      return snap
+      return CloudStateBundle(snapshot: snap, profile: env.profile)
     }
-    return try await fetchMyCompanion()
+    if let mine = try await fetchMyCompanion() {
+      return CloudStateBundle(snapshot: mine, profile: nil)
+    }
+    return nil
   }
 
   func ingestSteps(_ steps: Int, dayKey: String? = nil) async throws -> (energyDelta: Int, energy: Int) {
@@ -556,6 +579,8 @@ actor SupabaseClient {
     var mood: String?
     var presenceStatus: String?
     var activeTitle: String?
+    var titleKey: String?
+    var equippedTitleKey: String?
     var thoughts: [CloudThoughtDTO]?
   }
 
@@ -835,7 +860,7 @@ actor SupabaseClient {
       return snapshot(from: row)
     }
     if let cloud = try await fetchCloudState() {
-      return cloud
+      return cloud.snapshot
     }
     if let mine = try await fetchMyCompanion() {
       return mine

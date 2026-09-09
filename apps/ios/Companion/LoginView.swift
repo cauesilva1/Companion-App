@@ -110,31 +110,15 @@ struct LoginView: View {
     errorText = nil
     defer { busy = false }
     let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let registerMode = isRegister
-    let passwordCopy = password
     do {
-      try await withThrowingTaskGroup(of: Void.self) { group in
-        group.addTask { @MainActor in
-          if registerMode {
-            try await model.register(email: trimmedEmail, password: passwordCopy)
-          } else {
-            try await model.login(email: trimmedEmail, password: passwordCopy)
-          }
-        }
-        group.addTask {
-          try await Task.sleep(nanoseconds: 25_000_000_000)
-          throw TimeoutError()
-        }
-        try await group.next()
-        group.cancelAll()
+      if isRegister {
+        try await model.register(email: trimmedEmail, password: password)
+      } else {
+        try await model.login(email: trimmedEmail, password: password)
       }
       model.preferRegisterOnLogin = false
-    } catch is TimeoutError {
-      errorText = "Demorou demais. Confira a rede e tente de novo."
     } catch {
       errorText = error.localizedDescription
     }
   }
 }
-
-private struct TimeoutError: Error {}

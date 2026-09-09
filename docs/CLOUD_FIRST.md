@@ -19,7 +19,7 @@ export SUPABASE_ACCESS_TOKEN=sbp_...
 ./scripts/deploy-edge-functions.sh
 ```
 
-Funções ativas: `companion-state`, `context-ingest`, `steps-ingest`, `tick-decay`.
+Funções ativas: `companion-state`, `context-ingest`, `steps-ingest`, `thoughts`, `tick-decay`.
 
 CLI local (se não estiver no PATH): `.tools/supabase`.
 

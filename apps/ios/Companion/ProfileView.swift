@@ -221,13 +221,24 @@ struct ProfileView: View {
     errorText = nil
     defer { loading = false }
     do {
-      let bundle = try await SupabaseClient.shared.fetchProfileStats()
-      stats = bundle
-      if let title = bundle.activeTitle {
+      var bundle: SupabaseClient.ProfileStatsDTO?
+      if let cloud = try await SupabaseClient.shared.fetchCloudState() {
+        model.applyCloudMedia(cloud.snapshot)
+        bundle = cloud.profile
+      }
+      if bundle == nil {
+        bundle = try await SupabaseClient.shared.fetchProfileStats()
+      }
+      guard let statsBundle = bundle else {
+        errorText = "Sem dados de perfil"
+        return
+      }
+      stats = statsBundle
+      if let title = statsBundle.activeTitle {
         model.applyEquippedTitle(
           activeTitle: title,
-          titleKey: bundle.titleKey,
-          equippedTitleKey: bundle.equippedTitleKey
+          titleKey: statsBundle.titleKey,
+          equippedTitleKey: statsBundle.equippedTitleKey
         )
       }
     } catch {

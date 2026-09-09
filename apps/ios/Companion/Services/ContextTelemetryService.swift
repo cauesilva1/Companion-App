@@ -129,6 +129,8 @@ final class ContextTelemetryService: ObservableObject {
         if let gaming = result.gamingStatus { snap.gamingStatus = gaming }
         if let lm = result.lifeMode { snap.lifeMode = lm }
         if let title = result.activeTitle { snap.activeTitle = title }
+        if let tk = result.titleKey { snap.titleKey = tk }
+        if let ek = result.equippedTitleKey { snap.equippedTitleKey = ek }
         CompanionSnapshotStore.save(snap)
       }
       if result.thoughts != nil {

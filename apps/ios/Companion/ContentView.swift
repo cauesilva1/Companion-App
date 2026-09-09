@@ -420,7 +420,7 @@ final class CompanionViewModel: ObservableObject {
         await CompanionEngine.shared.setCloudAuthoritative(true)
         let remote: CompanionSnapshot?
         if let cloud = try await SupabaseClient.shared.fetchCloudState() {
-          remote = cloud
+          remote = cloud.snapshot
         } else {
           remote = try await SupabaseClient.shared.fetchMyCompanion()
         }
@@ -438,11 +438,11 @@ final class CompanionViewModel: ObservableObject {
           await LiveActivityController.update(snapshot: remote)
           await ContextTelemetryService.shared.ingestNow()
           // Re-pull leve se o ingest mudou lifeMode / morningThought / thoughts
-          if let again = try? await SupabaseClient.shared.fetchCloudState(), !again.isDemoPlaceholder {
-            apply(snapshot: again, reaction: reaction)
+          if let again = try? await SupabaseClient.shared.fetchCloudState(), !again.snapshot.isDemoPlaceholder {
+            apply(snapshot: again.snapshot, reaction: reaction)
             thoughtFeed = ThoughtFeedStore.load()
             syncThoughtsFromStores()
-            if let mode = again.lifeMode {
+            if let mode = again.snapshot.lifeMode {
               HouseZoneStore.syncWithLifeMode(CompanionLifeMode.parse(mode))
             }
           }
@@ -690,8 +690,8 @@ final class CompanionViewModel: ObservableObject {
       do {
         let result = try await SupabaseClient.shared.claimMissionCloud(missionId: mission.id)
         if let cloud = try await SupabaseClient.shared.fetchCloudState() {
-          _ = await CompanionEngine.shared.adoptCloudSnapshot(cloud)
-          apply(snapshot: cloud, reaction: "Missão concluída! +\(result.rewardEnergy) energia")
+          _ = await CompanionEngine.shared.adoptCloudSnapshot(cloud.snapshot)
+          apply(snapshot: cloud.snapshot, reaction: "Missão concluída! +\(result.rewardEnergy) energia")
         }
         await reloadMissions()
         return
@@ -1220,7 +1220,7 @@ struct ContentView: View {
           await ContextTelemetryService.shared.ingestNow()
           if let cloud = try? await SupabaseClient.shared.fetchCloudState() {
             await MainActor.run {
-              model.applyCloudMedia(cloud)
+              model.applyCloudMedia(cloud.snapshot)
               model.thoughtFeed = ThoughtFeedStore.load()
               if let line = note.userInfo?["line"] as? String, !line.isEmpty {
                 model.reaction = line

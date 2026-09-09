@@ -123,11 +123,20 @@ Deno.serve(async (req) => {
   }
 
   // Sync títulos (unlock append-only; não força re-equip)
-  const { data: title } = await sb.rpc("companion_refresh_titles_for_user", {
+  await sb.rpc("companion_refresh_titles_for_user", {
     p_user_id: userId,
   });
-  if (typeof title === "string" && title.length > 0) {
-    result.activeTitle = title;
+  const { data: titleRows } = await sb
+    .from("Companion")
+    .select("activeTitle, titleKey, equippedTitleKey")
+    .eq("userId", userId)
+    .order("createdAt", { ascending: true })
+    .limit(1);
+  const titleRow = titleRows?.[0];
+  if (titleRow) {
+    result.activeTitle = titleRow.activeTitle ?? result.activeTitle;
+    result.titleKey = titleRow.titleKey ?? null;
+    result.equippedTitleKey = titleRow.equippedTitleKey ?? null;
   }
 
   // Return latest thoughts so iOS can sync feed

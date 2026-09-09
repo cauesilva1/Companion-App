@@ -41,7 +41,7 @@ struct QuizView: View {
       }
     }
     .preferredColorScheme(.light)
-    .interactiveDismissDisabled(isSaving)
+    .interactiveDismissDisabled(true)
   }
 
   private var progressRow: some View {
@@ -185,7 +185,22 @@ struct QuizView: View {
         onFinished(created, draft)
         return
       } catch {
-        errorMessage = error.localizedDescription
+        let ns = error as NSError
+        let offline =
+          (error as? URLError) != nil
+          || ns.domain == NSURLErrorDomain
+          || (error as? SupabaseError).map { err -> Bool in
+            if case .http(let code, _) = err { return code == 0 || code >= 500 }
+            return false
+          } ?? false
+        if offline || (error as? URLError)?.code == .notConnectedToInternet
+          || (error as? URLError)?.code == .timedOut
+          || (error as? URLError)?.code == .networkConnectionLost {
+          errorMessage =
+            "Sem conexão. Suas respostas foram guardadas — tente Nascer de novo quando a rede voltar."
+        } else {
+          errorMessage = error.localizedDescription
+        }
         isSaving = false
         return
       }

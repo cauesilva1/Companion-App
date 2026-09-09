@@ -464,6 +464,7 @@ enum LocalVoice {
     gamingStatus: String? = nil,
     mediaHint: String? = nil
   ) -> String {
+    _ = (archetype, mood, energy, zoneName, traits, gamingStatus, mediaHint)
     let mode = CompanionLifeMode.parse(lifeMode)
 
     if mode == .sleep {
